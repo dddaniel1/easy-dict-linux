@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Easydict
+Comment=Elegant Dictionary & Translator for Linux
+GenericName=Dictionary & Translator
+Exec=easydict
+Icon=easydict
+Terminal=false
+Type=Application
+Categories=Utility;Dictionary;Translation;Office;
+StartupNotify=true
+Keywords=dictionary;translation;dict;fanyi;youdao;bing;google;ai;deepseek;
+Actions=QuerySelection;
+
+[Desktop Action QuerySelection]
+Name=Translate Selection
+Exec=easydict --selection
