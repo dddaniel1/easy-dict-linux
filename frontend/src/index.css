@@ -58,37 +58,6 @@ body {
   overflow: hidden;
 }
 
-.settings-backdrop {
-  opacity: 1;
-  transition: opacity 220ms var(--motion-ease-out);
-}
-
-.settings-popup {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  transition: opacity 220ms var(--motion-ease-out), transform 220ms var(--motion-ease-out);
-}
-
-.settings-backdrop[data-starting-style],
-.settings-backdrop[data-ending-style],
-.settings-popup[data-starting-style],
-.settings-popup[data-ending-style] {
-  opacity: 0;
-}
-
-.settings-popup[data-starting-style] {
-  transform: translateY(8px) scale(0.98);
-}
-
-.settings-popup[data-ending-style] {
-  transform: translateY(4px) scale(0.99);
-}
-
-.settings-backdrop[data-ending-style],
-.settings-popup[data-ending-style] {
-  transition-duration: 140ms;
-}
-
 .result-content,
 .toast-notice {
   animation: feedback-in 200ms var(--motion-ease-out);
@@ -106,19 +75,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-popup,
-  .settings-popup[data-starting-style],
-  .settings-popup[data-ending-style] {
-    transform: none;
-  }
-
-  .settings-popup,
-  .settings-backdrop,
-  .settings-popup[data-ending-style],
-  .settings-backdrop[data-ending-style] {
-    transition-duration: 80ms;
-  }
-
   .result-content,
   .toast-notice {
     animation: feedback-fade 80ms ease-out;

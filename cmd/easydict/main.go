@@ -21,17 +21,19 @@ import (
 )
 
 type Application struct {
-	window       *mygo.Window
-	bubbleWindow *mygo.Window
-	tray         *mygo.Tray
-	manager      *services.Manager
-	bridge       *bridge.AppBridge
-	ocrService   *services.OCRService
+	window          *mygo.Window
+	bubbleWindow    *mygo.Window
+	selectionWindow *mygo.Window
+	tray            *mygo.Tray
+	manager         *services.Manager
+	bridge          *bridge.AppBridge
+	ocrService      *services.OCRService
 
-	mu            sync.Mutex
-	lastSelection string
-	frontendReady bool
-	pendingQuery  string
+	mu                 sync.Mutex
+	lastSelection      string
+	lastSelectionPoint mygo.Point
+	frontendReady      map[*mygo.Window]bool
+	pendingQuery       map[*mygo.Window]string
 }
 
 func main() {
@@ -45,8 +47,10 @@ func main() {
 	flag.Parse()
 
 	app := &Application{
-		manager:    services.NewManager(),
-		ocrService: services.NewOCRService(),
+		manager:       services.NewManager(),
+		ocrService:    services.NewOCRService(),
+		frontendReady: make(map[*mygo.Window]bool),
+		pendingQuery:  make(map[*mygo.Window]string),
 	}
 	app.bridge = bridge.NewAppBridge(
 		app.manager,
@@ -56,24 +60,24 @@ func main() {
 		func() {
 			app.triggerBubbleSelection()
 		},
-		func() string {
+		func(win *mygo.Window) string {
 			app.mu.Lock()
 			defer app.mu.Unlock()
-			app.frontendReady = true
-			text := app.pendingQuery
-			app.pendingQuery = ""
+			app.frontendReady[win] = true
+			text := app.pendingQuery[win]
+			delete(app.pendingQuery, win)
 			return text
 		},
 	)
 
-	// 1. Single instance guarantee
+	// 1. Set App name BEFORE single instance lock so socket hash is consistent
+	mygo.App.SetName("Easydict")
 	if !mygo.App.RequestSingleInstanceLock() {
-		// If another instance is running, it will receive OnSecondInstance
+		// If another instance is running, it hands over args and exits
 		return
 	}
 
-	// 2. Set App metadata & bind Go RPC methods
-	mygo.App.SetName("Easydict")
+	// 2. Bind Go RPC methods & keep running on window close
 	mygo.App.OnWindowAllClosed(func() {}) // keep running in background/tray
 	mygo.BindAs("AppBridge", app.bridge)
 
@@ -90,6 +94,12 @@ func main() {
 		if slices.Contains(args, "--selection") || slices.Contains(args, "-s") {
 			app.querySelection()
 			return
+		}
+		for _, arg := range args {
+			if !strings.HasPrefix(arg, "-") && strings.TrimSpace(arg) != "" {
+				app.queryText(strings.TrimSpace(arg))
+				return
+			}
 		}
 		// Default or --input: open and focus input
 		app.showWindowInput()
@@ -206,6 +216,12 @@ func (a *Application) showWindowInput() {
 		return
 	}
 	a.hideBubble()
+	a.mu.Lock()
+	selectionWindow := a.selectionWindow
+	a.mu.Unlock()
+	if selectionWindow != nil {
+		selectionWindow.Hide()
+	}
 	if !a.window.IsVisible() {
 		a.window.Center()
 		a.window.Show()
@@ -270,14 +286,14 @@ func (a *Application) positionWindowNearCursor() {
 func (a *Application) triggerBubbleSelection() {
 	a.mu.Lock()
 	text := a.lastSelection
+	point := a.lastSelectionPoint
 	a.mu.Unlock()
 	a.hideBubble()
 
 	if text == "" {
 		return
 	}
-	a.positionWindowNearCursor()
-	a.queryText(text)
+	a.showSelectionTranslation(text, point)
 }
 
 func (a *Application) querySelection() {
@@ -287,35 +303,41 @@ func (a *Application) querySelection() {
 		services.SendDesktopNotification("Easydict", "未读取到选中文字，请重新选中或使用截图翻译")
 		return
 	}
-	a.positionWindowNearCursor()
-	a.queryText(text)
+	x, y := services.GetCursorScreenPoint()
+	a.showSelectionTranslation(text, mygo.Point{X: x, Y: y})
 }
 
 func (a *Application) queryText(text string) {
 	if a.window == nil {
 		return
 	}
+	a.hideBubble()
 	if !a.window.IsVisible() {
+		a.window.Center()
 		a.window.Show()
 	}
 	a.focusAppWindow()
+	a.deliverQuery(a.window, text)
+}
 
+func (a *Application) deliverQuery(win *mygo.Window, text string) {
 	a.mu.Lock()
-	if !a.frontendReady {
-		a.pendingQuery = text
+	if !a.frontendReady[win] {
+		a.pendingQuery[win] = text
 		a.mu.Unlock()
 		return
 	}
 	a.mu.Unlock()
 	escaped, _ := json.Marshal(text)
+	cfg, _ := json.Marshal(config.Get())
 	js := fmt.Sprintf(`
 		(function() {
 			if (window.__easydict_query) {
-				window.__easydict_query(%s);
+				window.__easydict_query(%s, %s);
 			}
 		})();
-	`, escaped)
-	a.window.Page().Eval(js)
+	`, escaped, cfg)
+	win.Page().Eval(js)
 }
 
 func (a *Application) triggerOCRTranslate() {
@@ -405,18 +427,19 @@ func (a *Application) startSelectionWatcher() {
 				debounce.Stop()
 				hide.Stop()
 				pending = ""
-				if text == "" || len([]rune(text)) > 1000 || !config.Get().AutoShowFloatingButton || a.window.IsFocused() {
+				if text == "" || len([]rune(text)) > 1000 || !config.Get().AutoShowFloatingButton || a.translationWindowFocused() {
 					continue
 				}
 				pending = text
 				x, y = services.GetCursorScreenPoint()
 				debounce.Reset(180 * time.Millisecond)
 			case <-debounce.C:
-				if pending == "" || !config.Get().AutoShowFloatingButton || a.window.IsFocused() {
+				if pending == "" || !config.Get().AutoShowFloatingButton || a.translationWindowFocused() {
 					continue
 				}
 				a.mu.Lock()
 				a.lastSelection = pending
+				a.lastSelectionPoint = mygo.Point{X: x, Y: y}
 				a.mu.Unlock()
 				// Reset the persistent page for every newly displayed selection.
 				if _, err := a.bubbleWindow.Page().Eval(`window.__easydict_reset_bubble && window.__easydict_reset_bubble()`); err != nil {
@@ -439,7 +462,7 @@ func (a *Application) startSelectionWatcher() {
 				if pending == "" {
 					continue
 				}
-				if !config.Get().AutoShowFloatingButton || a.window.IsFocused() {
+				if !config.Get().AutoShowFloatingButton || a.translationWindowFocused() {
 					pending = ""
 					debounce.Stop()
 					a.hideBubble()

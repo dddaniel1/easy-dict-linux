@@ -113,6 +113,8 @@ make test
 make install
 ```
 
+在 Hyprland 桌面会话中，可用系统 Python（需 PyGObject）执行 `python3 scripts/check-desktop.py --pid <Easydict进程ID>`，验证划词后焦点和高亮保留、托盘退出及监听进程清理。此检查会打开临时测试窗口，并退出指定的 Easydict 实例。
+
 安装完成后，在终端直接输入：
 ```bash
 easydict

@@ -17,7 +17,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   open,
   ...props
 }) => (
-  <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && props.onClose()}>
+  // The app scrolls inside <main>; locking the document again repaints the WebKit surface.
+  <Dialog.Root modal="trap-focus" open={open} onOpenChange={(nextOpen) => !nextOpen && props.onClose()}>
     <Dialog.Portal>
       <Dialog.Backdrop className="settings-backdrop fixed inset-0 z-50 bg-black/60" />
       <Dialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4">

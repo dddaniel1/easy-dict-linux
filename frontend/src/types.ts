@@ -52,10 +52,11 @@ declare global {
     mygo?: {
       call: (method: string, ...args: any[]) => Promise<any>;
     };
-    __easydict_query?: (text: string) => void;
+    __easydict_query?: (text: string, config?: AppConfig) => void;
     __easydict_focus_input?: () => void;
     __easydict_set_pinned?: (pinned: boolean) => void;
     __easydict_open_settings?: () => void;
     __easydict_reset_bubble?: () => void;
+    __easydict_selection_window?: boolean;
   }
 }

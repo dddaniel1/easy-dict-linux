@@ -15,10 +15,10 @@ type AppBridge struct {
 	ocrService     *services.OCRService
 	onQueryText    func(text string)
 	onBubbleAction func()
-	onReady        func() string
+	onReady        func(*mygo.Window) string
 }
 
-func NewAppBridge(mgr *services.Manager, onQueryText func(text string), onBubbleAction func(), onReady func() string) *AppBridge {
+func NewAppBridge(mgr *services.Manager, onQueryText func(text string), onBubbleAction func(), onReady func(*mygo.Window) string) *AppBridge {
 	return &AppBridge{
 		manager:        mgr,
 		ocrService:     services.NewOCRService(),
@@ -31,7 +31,7 @@ func NewAppBridge(mgr *services.Manager, onQueryText func(text string), onBubble
 // Ready hands off a launch query after React has loaded its configuration and hooks.
 func (b *AppBridge) Ready(ctx context.Context) string {
 	if b.onReady != nil {
-		return b.onReady()
+		return b.onReady(mygo.CallerWindow(ctx))
 	}
 	return ""
 }

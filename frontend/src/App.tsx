@@ -47,17 +47,25 @@ export function App() {
     toastManager.add({ title: msg });
   };
 
-  const callGo = (method: string, ...args: any[]) => {
-    if (window.mygo && window.mygo.call) {
-      return window.mygo.call(method, ...args);
+  const callGo = async (method: string, ...args: any[]): Promise<any> => {
+    for (let i = 0; i < 30; i++) {
+      if ((window as any).mygo?.call) {
+        return (window as any).mygo.call(method, ...args);
+      }
+      await new Promise((r) => setTimeout(r, 50));
     }
-    console.warn("mygo IPC not available");
-    return Promise.reject(new Error("mygo not initialized"));
+    console.warn("mygo IPC not available for " + method);
+    throw new Error("mygo not initialized");
   };
 
   // Bind global RPC hooks for Go runtime
   useEffect(() => {
-    window.__easydict_query = (text: string) => {
+    window.__easydict_query = (text: string, latestConfig?: AppConfig) => {
+      if (latestConfig) {
+        configRef.current = latestConfig;
+        setConfig(latestConfig);
+        applyTheme(latestConfig.theme);
+      }
       if (text) {
         setQuery(text);
         executeSearch(text, fromLang, toLang);
@@ -69,6 +77,11 @@ export function App() {
         }, 50);
       }
     };
+    if ((window as any).__easydict_pending) {
+      const p = (window as any).__easydict_pending;
+      delete (window as any).__easydict_pending;
+      window.__easydict_query(p);
+    }
     window.__easydict_focus_input = () => {
       if (inputRef.current) {
         inputRef.current.focus();
@@ -134,7 +147,7 @@ export function App() {
           if (pending && queryVersion.current === version) {
             setQuery(pending);
             executeSearch(pending, fromLang, cfg.default_target_lang || toLang);
-          } else if (!pending && cfg.auto_query_clipboard && version === 0) {
+          } else if (!pending && !window.__easydict_selection_window && cfg.auto_query_clipboard && version === 0) {
             return callGo("AppBridge.GetClipboardText").then((clipText: string) => {
               if (queryVersion.current === version && clipText && clipText.trim().length < 300) {
                 setQuery(clipText.trim());
@@ -198,7 +211,7 @@ export function App() {
       case "google":
         return "Google 翻译";
       case "ai":
-        return config && config.ai_model ? `AI (${config.ai_model})` : "AI 智能词典";
+        return configRef.current?.ai_model ? `AI (${configRef.current.ai_model})` : "AI 智能词典";
       case "deepl":
         return "DeepL 翻译";
       default:
