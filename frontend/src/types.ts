@@ -72,6 +72,11 @@ export interface OCRTriggerResult {
   text?: string;
 }
 
+export interface ClipboardResult {
+  text: string;
+  error?: string;
+}
+
 declare global {
   interface Window {
     mygo?: {

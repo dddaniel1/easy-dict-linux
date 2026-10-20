@@ -45,6 +45,24 @@ func TestWaylandSelectionDoesNotFallBackToClipboardOrX11(t *testing.T) {
 	}
 }
 
+func TestReadClipboardTreatsStderrEmptySelectionAsEmpty(t *testing.T) {
+	t.Setenv("WAYLAND_DISPLAY", "test-wayland")
+	fakeClipboardTool(t, "wl-paste", "printf 'No selection\\n' >&2; exit 1")
+	text, err := ReadClipboardText()
+	if err != nil || text != "" {
+		t.Fatalf("text = %q, error = %v", text, err)
+	}
+}
+
+func TestReadClipboardReportsStderrFailure(t *testing.T) {
+	t.Setenv("WAYLAND_DISPLAY", "test-wayland")
+	fakeClipboardTool(t, "wl-paste", "printf 'compositor unavailable\\n' >&2; exit 1")
+	_, err := ReadClipboardText()
+	if err == nil || !strings.Contains(err.Error(), "compositor unavailable") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCopyWritesOnlyClipboardAndReportsErrors(t *testing.T) {
 	t.Setenv("WAYLAND_DISPLAY", "test-wayland")
 	dir := t.TempDir()

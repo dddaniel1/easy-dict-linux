@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Toast } from "@/components/ui/toast";
 import { Tabs } from "@base-ui/react";
-import { enabledServices, startQuery, translationSettingsChanged } from "@/lib/query";
+import { enabledServices, hasPendingResults, startQuery, translationSettingsChanged } from "@/lib/query";
 import {
   Search,
   Pin,
@@ -19,8 +19,8 @@ import {
   Square,
   Maximize2,
 } from "lucide-react";
-import type { OCRTriggerResult, SaveConfigResult } from "@/types";
-import { shortcutParts } from "@/lib/shortcut";
+import type { ClipboardResult, OCRTriggerResult, SaveConfigResult } from "@/types";
+import { normalizeShortcut, shortcutParts } from "@/lib/shortcut";
 
 function applyTheme(theme: AppConfig["theme"]) {
   document.documentElement.classList.toggle(
@@ -47,6 +47,8 @@ export function App() {
   const [isQuerying, setIsQuerying] = useState(false);
   const isSelectionWindow = Boolean(window.__easydict_selection_window);
   const [shortcutStatuses, setShortcutStatuses] = useState<import("@/types").ShortcutStatus[]>([]);
+  const settingsOpenRef = useRef(isSettingsOpen);
+  settingsOpenRef.current = isSettingsOpen;
 
   useEffect(() => () => querySession.current?.cancel(), []);
   useEffect(() => {
@@ -119,14 +121,15 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
         setIsSettingsOpen((prev) => !prev);
+        return;
       }
       if (e.key === "Escape") {
+        if (settingsOpenRef.current) return;
+        // The search input owns Escape while it is focused: first clear the
+        // query, then hide. Do not let the window-level handler hide it too.
+        if (e.target instanceof HTMLInputElement && e.target.id === "query-input") return;
         e.preventDefault();
-        if (isSettingsOpen) {
-          setIsSettingsOpen(false);
-        } else {
-          callGo("AppBridge.HideWindow");
-        }
+        callGo("AppBridge.HideWindow");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -139,7 +142,7 @@ export function App() {
       window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [fromLang, toLang, config, isSettingsOpen]);
+  }, [fromLang, toLang, config]);
 
   // Load configuration on mount
   useEffect(() => {
@@ -159,10 +162,13 @@ export function App() {
             setQuery(pending);
             executeSearch(pending, fromLang, cfg.default_target_lang || toLang);
           } else if (!pending && !window.__easydict_selection_window && cfg.auto_query_clipboard && version === 0) {
-            return callGo("AppBridge.GetClipboardText").then((clipText: string) => {
-              if (queryVersion.current === version && clipText && clipText.trim().length < 300) {
+            return callGo("AppBridge.GetClipboardText").then((clip: ClipboardResult | string) => {
+              const clipText = typeof clip === "string" ? clip : clip?.text || "";
+              if (queryVersion.current === version && clipText.trim() && clipText.trim().length < 300) {
                 setQuery(clipText.trim());
                 executeSearch(clipText.trim(), fromLang, cfg.default_target_lang || toLang);
+              } else if (typeof clip !== "string" && clip?.error && queryVersion.current === version) {
+                showToast(clip.error);
               }
             });
           }
@@ -203,6 +209,7 @@ export function App() {
         is_dictionary: false,
       }))
     );
+    setActiveTab("all");
 
     setIsQuerying(true);
     querySession.current = startQuery(
@@ -230,10 +237,10 @@ export function App() {
   };
 
   const stopQuery = () => {
-    queryVersion.current++;
-    querySession.current?.cancel();
+    const session = querySession.current;
+    if (!session) return;
+    session.cancel();
     querySession.current = null;
-    setIsQuerying(false);
   };
 
   const getServiceName = (id: string) => {
@@ -262,10 +269,19 @@ export function App() {
   }, [shortcutStatuses]);
 
   const handleRefreshSingle = (serviceId: string) => {
-    if (!querySession.current) {
+    const session = querySession.current;
+    if (!session) {
+      const stillLoading = results.some((result) => result.status === "loading");
+      if (stillLoading) {
+        showToast("当前查询已停止，请重新翻译后再刷新");
+        return;
+      }
       if (query.trim()) executeSearch(query.trim());
       return;
     }
+
+    const service = results.find((result) => result.service_id === serviceId);
+    if (service?.status === "loading") return;
 
     setResults((prev) =>
       prev.map((r) =>
@@ -274,7 +290,7 @@ export function App() {
     );
     setIsQuerying(true);
 
-    void querySession.current.refresh(serviceId);
+    void session.refresh(serviceId);
   };
 
   const handleCopy = (text: string) => {
@@ -283,8 +299,10 @@ export function App() {
       if (ok) {
         showToast("已复制到剪贴板");
       } else {
-        navigator.clipboard.writeText(text).then(() => showToast("已复制到剪贴板"));
+        return navigator.clipboard.writeText(text).then(() => showToast("已复制到剪贴板"));
       }
+    }).catch(() => {
+      showToast("复制失败，请检查剪贴板工具");
     });
   };
 
@@ -305,13 +323,18 @@ export function App() {
   };
 
   const handlePasteClipboard = () => {
-    callGo("AppBridge.GetClipboardText").then((clip: string) => {
-      if (clip) {
-        setQuery(clip.trim());
-        executeSearch(clip.trim(), fromLang, toLang);
+    callGo("AppBridge.GetClipboardText").then((clip: ClipboardResult | string) => {
+      const text = typeof clip === "string" ? clip : clip?.text || "";
+      if (text.trim()) {
+        setQuery(text.trim());
+        executeSearch(text.trim(), fromLang, toLang);
+      } else if (typeof clip !== "string" && clip?.error) {
+        showToast(clip.error);
       } else {
         showToast("剪贴板内容为空");
       }
+    }).catch(() => {
+      showToast("无法读取剪贴板，请检查 wl-clipboard、xclip 或 xsel");
     });
   };
 
@@ -331,13 +354,26 @@ export function App() {
 
   const togglePin = () => {
     const next = !isPinned;
-    callGo("AppBridge.SetAlwaysOnTop", next).then(() => {
-      setIsPinned(next);
-      showToast(next ? "窗口已置顶" : "已取消置顶");
+    callGo("AppBridge.SetAlwaysOnTop", next).then((ok: boolean) => {
+      if (ok) {
+        setIsPinned(next);
+        showToast(next ? "窗口已置顶" : "已取消置顶");
+      } else {
+        showToast("无法修改窗口置顶状态");
+      }
+    }).catch(() => {
+      showToast("无法修改窗口置顶状态");
     });
   };
 
   const handleSaveConfig = (newCfg: AppConfig): Promise<SaveConfigResult> => {
+    newCfg = {
+      ...newCfg,
+      shortcut_input: normalizeShortcut(newCfg.shortcut_input) || newCfg.shortcut_input,
+      shortcut_selection: normalizeShortcut(newCfg.shortcut_selection) || newCfg.shortcut_selection,
+      shortcut_ocr: normalizeShortcut(newCfg.shortcut_ocr) || newCfg.shortcut_ocr,
+      shortcut_ocr_silent: normalizeShortcut(newCfg.shortcut_ocr_silent) || newCfg.shortcut_ocr_silent,
+    };
     return callGo("AppBridge.SaveConfig", newCfg).then((result: SaveConfigResult | boolean) => {
       if (typeof result === "boolean") {
         return { ok: result, saved: result } as SaveConfigResult;
@@ -380,6 +416,8 @@ export function App() {
     activeTab === "all"
       ? results
       : results.filter((r) => r.service_id === activeTab);
+  const showStopButton = hasPendingResults(results);
+  const canTranslate = query.trim().length > 0;
 
   return (
     <div className="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
@@ -408,16 +446,19 @@ export function App() {
             type="text"
             value={query}
             onChange={(e) => {
-              queryVersion.current++;
               setQuery(e.target.value);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") executeSearch(query);
+              if (e.key === "Enter") {
+                if (query.trim()) executeSearch(query);
+              }
               if (e.key === "Escape") {
                 if (query) {
+                  e.preventDefault();
                   setQuery("");
                   executeSearch("");
                 } else {
+                  e.preventDefault();
                   callGo("AppBridge.HideWindow");
                 }
               }
@@ -441,7 +482,7 @@ export function App() {
                 <X className="w-3.5 h-3.5" />
               </Button>
             )}
-            {isQuerying ? (
+            {showStopButton ? (
               <Button
                 id="stop-btn"
                 variant="outline"
@@ -457,6 +498,7 @@ export function App() {
               <Button
                 id="search-btn"
                 size="sm"
+                disabled={!canTranslate}
                 className="h-7 px-2.5 text-xs rounded-md shadow-none font-medium"
                 onClick={() => executeSearch(query)}
               >
@@ -521,29 +563,35 @@ export function App() {
             <Button
               variant="outline"
               size="sm"
+              aria-label="读取剪贴板 CLIPBOARD"
               className="h-7 px-2 text-xs gap-1 text-zinc-600 dark:text-zinc-300 rounded-full"
               onClick={handlePasteClipboard}
               title="读取系统剪贴板 CLIPBOARD（Ctrl+C 复制的内容），不是鼠标选区 PRIMARY"
             >
               <ClipboardCopy className="w-3 h-3" />
-              剪贴板 CLIPBOARD
+              <span className="hidden sm:inline">剪贴板 CLIPBOARD</span>
+              <span className="sm:hidden">剪贴板</span>
             </Button>
 
             <Button
               variant="outline"
               size="sm"
               disabled={isOcrLoading}
+              aria-label={isOcrLoading ? "正在截图" : "截图 OCR"}
               className="h-7 px-2 text-xs gap-1 text-zinc-600 dark:text-zinc-300 rounded-full"
               onClick={handleTriggerOCR}
               title="截图并识别翻译 (Alt+S)"
             >
               <Crop className="w-3 h-3" />
-              {isOcrLoading ? "截图中..." : "截图OCR"}
+              <span className="hidden sm:inline">{isOcrLoading ? "截图中..." : "截图 OCR"}</span>
+              <span className="sm:hidden">{isOcrLoading ? "截图" : "OCR"}</span>
             </Button>
 
             <Button
               variant="ghost"
               size="icon"
+              aria-label={isPinned ? "取消窗口置顶" : "置顶窗口"}
+              aria-pressed={isPinned}
               className={`h-7 w-7 ${
                 isPinned
                   ? "text-blue-600 bg-blue-50 dark:bg-blue-950/40"
@@ -558,12 +606,13 @@ export function App() {
             <Button
               variant="outline"
               size="sm"
+              aria-label="打开偏好设置"
               className="h-7 px-2.5 text-xs gap-1.5 text-zinc-700 dark:text-zinc-200 rounded-full font-medium border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-2xs"
               onClick={() => setIsSettingsOpen(true)}
               title="偏好设置 (Ctrl+,)"
             >
               <Settings className="w-3.5 h-3.5 text-zinc-500" />
-              设置
+              <span className="hidden sm:inline">设置</span>
             </Button>
           </div>
         </div>
@@ -602,7 +651,7 @@ export function App() {
             className="h-6 px-2 text-[11px] gap-1 text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400"
           >
             <Settings className="w-3 h-3" />
-            偏好设置
+            <span className="hidden sm:inline">偏好设置</span>
           </Button>
         </Tabs.List>
 
@@ -645,7 +694,7 @@ export function App() {
                   onClick={() => setIsSettingsOpen(true)}
                 >
                   <Settings className="w-3.5 h-3.5" />
-                  打开偏好设置 (修改快捷键 / 开关划词悬浮)
+                  打开偏好设置
                 </Button>
               </div>
             </div>

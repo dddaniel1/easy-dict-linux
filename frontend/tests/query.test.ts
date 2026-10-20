@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { enabledServices, startQuery, translationSettingsChanged } from "../src/lib/query.ts";
+import { enabledServices, hasPendingResults, startQuery, translationSettingsChanged } from "../src/lib/query.ts";
 import type { ServiceResult, AppConfig } from "../src/types.ts";
 
 function deferred<T>() {
@@ -104,4 +104,11 @@ test("cancelling reports only services that are still loading", async () => {
   slow.resolve(result("slow", "late"));
   await settle();
   assert.deepEqual(cancelled, [["slow"]]);
+});
+
+test("stop is only offered while at least one result is loading", () => {
+  assert.equal(hasPendingResults([]), false);
+  assert.equal(hasPendingResults([{ ...result("bing", "done"), status: "success" }]), false);
+  assert.equal(hasPendingResults([{ ...result("bing", ""), status: "cancelled" }]), false);
+  assert.equal(hasPendingResults([{ ...result("bing", ""), status: "loading" }]), true);
 });

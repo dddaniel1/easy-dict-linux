@@ -16,6 +16,11 @@ type OCRTriggerResult struct {
 	Text      string `json:"text,omitempty"`
 }
 
+type ClipboardResult struct {
+	Text  string `json:"text"`
+	Error string `json:"error,omitempty"`
+}
+
 // AppBridge is exposed to JavaScript via `mygo.BindAs("AppBridge", ...)` or `mygo.Bind(...)`
 type AppBridge struct {
 	manager                *services.Manager
@@ -104,9 +109,14 @@ func (b *AppBridge) GetShortcutStatuses(ctx context.Context) []shortcuts.Status 
 	return b.getShortcutStatuses()
 }
 
-// GetClipboardText reads CLIPBOARD without falling back to the PRIMARY selection.
-func (b *AppBridge) GetClipboardText(ctx context.Context) string {
-	return services.GetClipboardText()
+// GetClipboardText reads CLIPBOARD without falling back to the PRIMARY
+// selection. The result includes an actionable error for missing tools.
+func (b *AppBridge) GetClipboardText(ctx context.Context) ClipboardResult {
+	text, err := services.ReadClipboardText()
+	if err != nil {
+		return ClipboardResult{Error: err.Error()}
+	}
+	return ClipboardResult{Text: text}
 }
 
 // CopyText copies string to system clipboard

@@ -21,6 +21,12 @@ export function enabledServices(config: AppConfig | null): string[] {
   });
 }
 
+// Stop is an action on the running query, not on the search box. Only show it
+// while at least one service still has work in flight.
+export function hasPendingResults(results: ServiceResult[]): boolean {
+  return results.some((result) => result.status === "loading");
+}
+
 // A session owns its results; cancelling it prevents older queries or refreshes
 // from updating the UI and reports the services that were still pending.
 export function startQuery(

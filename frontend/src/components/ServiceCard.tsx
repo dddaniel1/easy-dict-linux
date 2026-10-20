@@ -37,24 +37,25 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
     }
   };
 
-  const copyContent = () => {
-    let text = result.translation || "";
-    if (!text && result.definitions) {
-      text = result.definitions.map((d) => `${d.pos} ${d.meanings.join(", ")}`).join("\n");
-    }
-    onCopy(text);
-  };
-
-  const speakContent = () => {
-    onSpeak(result.translation || "");
-  };
-
   const sourceLabel = result.is_dictionary
     ? "词典"
     : result.service_id === "ai"
       ? "AI"
       : "翻译";
-  const canCopy = Boolean(result.translation || result.definitions?.length);
+  // Copy and read-aloud are useful for definitions too, not only for sentence
+  // translations. Include examples as a fallback for dictionary-only results.
+  const resultText = (() => {
+    const sections: string[] = [];
+    if (result.translation) sections.push(result.translation);
+    if (result.definitions?.length) {
+      sections.push(result.definitions.map((d) => `${d.pos ? d.pos + " " : ""}${d.meanings.join("；")}`).join("\n"));
+    }
+    if (!sections.length && result.sentences?.length) {
+      sections.push(result.sentences.map((sentence) => `${sentence.source}\n${sentence.target}`).join("\n"));
+    }
+    return sections.join("\n\n").trim();
+  })();
+  const canCopy = Boolean(resultText);
   const priority = result.is_dictionary ? "ring-1 ring-rose-200/80 dark:ring-rose-900/50" : "";
 
   return (
@@ -86,9 +87,10 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={`朗读 ${result.service_name} 的结果`}
               className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-              onClick={speakContent}
-              title="朗读"
+              onClick={() => onSpeak(resultText)}
+              title="朗读结果"
             >
               <Volume2 className="h-3.5 w-3.5" />
             </Button>
@@ -97,9 +99,10 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
             <Button
               variant="ghost"
               size="icon"
+              aria-label={`复制 ${result.service_name} 的结果`}
               className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-              onClick={copyContent}
-              title="复制"
+              onClick={() => onCopy(resultText)}
+              title="复制结果"
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>
@@ -107,11 +110,13 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+            aria-label={`刷新 ${result.service_name}`}
+            disabled={result.status === "loading"}
+            className="h-7 w-7 text-zinc-500 hover:text-zinc-900 disabled:opacity-40 dark:hover:text-zinc-100"
             onClick={() => onRefresh(result.service_id)}
-            title="刷新"
+            title={result.status === "loading" ? "正在查询" : "重新查询此服务"}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className={`h-3.5 w-3.5 ${result.status === "loading" ? "animate-spin motion-reduce:animate-none" : ""}`} />
           </Button>
         </div>
       </CardHeader>

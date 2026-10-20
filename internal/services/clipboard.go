@@ -26,19 +26,52 @@ func GetSelectedText() string {
 
 // GetClipboardText returns the standard CLIPBOARD text.
 func GetClipboardText() string {
+	text, _ := ReadClipboardText()
+	return text
+}
+
+// ReadClipboardText distinguishes an empty clipboard from a missing reader,
+// so the UI can explain what the user needs to install.
+func ReadClipboardText() (string, error) {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		return runCommandQuick("wl-paste", "--type", "text", "--no-newline")
+		if !isCommandAvailable("wl-paste") {
+			return "", fmt.Errorf("未安装 wl-clipboard：请安装后重启 Easydict")
+		}
+		text, err := runCommandOutput("wl-paste", "--type", "text", "--no-newline")
+		if err != nil && !isEmptyClipboardError(err) {
+			return "", fmt.Errorf("读取剪贴板失败：%w", err)
+		}
+		return strings.TrimSpace(text), nil
 	}
-	if text := runCommandQuick("xclip", "-o", "-selection", "clipboard"); text != "" {
-		return text
+	var readErrors []string
+	if isCommandAvailable("xclip") {
+		text, err := runCommandOutput("xclip", "-o", "-selection", "clipboard")
+		if err == nil {
+			return strings.TrimSpace(text), nil
+		}
+		if !isEmptyClipboardError(err) {
+			readErrors = append(readErrors, "xclip: "+err.Error())
+		}
 	}
-	if text := runCommandQuick("xsel", "-o", "-b"); text != "" {
-		return text
+	if isCommandAvailable("xsel") {
+		text, err := runCommandOutput("xsel", "-o", "-b")
+		if err == nil {
+			return strings.TrimSpace(text), nil
+		}
+		if !isEmptyClipboardError(err) {
+			readErrors = append(readErrors, "xsel: "+err.Error())
+		}
 	}
 	if mygo.App != nil {
-		return strings.TrimSpace(mygo.Clipboard.ReadText())
+		return strings.TrimSpace(mygo.Clipboard.ReadText()), nil
 	}
-	return ""
+	if !isCommandAvailable("xclip") && !isCommandAvailable("xsel") {
+		return "", fmt.Errorf("未安装剪贴板工具：请安装 xclip 或 xsel")
+	}
+	if len(readErrors) > 0 {
+		return "", fmt.Errorf("读取剪贴板失败：%s", strings.Join(readErrors, "；"))
+	}
+	return "", nil
 }
 
 // WriteClipboardText sets the system clipboard on Wayland/X11
@@ -120,17 +153,45 @@ func GetCursorScreenPoint() (int, int) {
 }
 
 func runCommandQuick(name string, args ...string) string {
+	text, err := runCommandOutput(name, args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func runCommandOutput(name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	if err := cmd.Run(); err == nil {
-		s := strings.TrimSpace(stdout.String())
-		if s != "" {
-			return s
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			return "", fmt.Errorf("%w: %s", err, detail)
+		}
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func isEmptyClipboardError(err error) bool {
+	message := strings.ToLower(err.Error())
+	for _, emptyMessage := range []string{
+		"no selection",
+		"nothing is copied",
+		"clipboard is empty",
+		"selection is empty",
+		"target string not available",
+		"target utf8_string not available",
+	} {
+		if strings.Contains(message, emptyMessage) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
