@@ -42,8 +42,9 @@ type Sentence struct {
 type ServiceResult struct {
 	ServiceID    string       `json:"service_id"`
 	ServiceName  string       `json:"service_name"`
-	Status       string       `json:"status"` // "success", "error", "loading"
+	Status       string       `json:"status"` // "success", "error", "loading", "cancelled"
 	Error        string       `json:"error,omitempty"`
+	DurationMS   int64        `json:"duration_ms,omitempty"`
 	IsDictionary bool         `json:"is_dictionary"`
 	Phonetics    []Phonetic   `json:"phonetics,omitempty"`
 	Definitions  []Definition `json:"definitions,omitempty"`
@@ -53,10 +54,10 @@ type ServiceResult struct {
 
 // QueryRequest is the incoming user query parameter
 type QueryRequest struct {
-	Text       string   `json:"text"`
-	FromLang   Language `json:"from_lang"`
-	ToLang     Language `json:"to_lang"`
-	Services   []string `json:"services,omitempty"` // empty means use enabled services
+	Text     string   `json:"text"`
+	FromLang Language `json:"from_lang"`
+	ToLang   Language `json:"to_lang"`
+	Services []string `json:"services,omitempty"` // empty means use enabled services
 }
 
 // TranslationProvider defines the interface each service must implement

@@ -18,8 +18,9 @@ export interface Sentence {
 export interface ServiceResult {
   service_id: string;
   service_name: string;
-  status: "success" | "error" | "loading";
+  status: "success" | "error" | "loading" | "cancelled";
   error?: string;
+  duration_ms?: number;
   is_dictionary: boolean;
   phonetics?: Phonetic[];
   definitions?: Definition[];
@@ -45,6 +46,30 @@ export interface AppConfig {
   shortcut_ocr: string;
   shortcut_ocr_silent: string;
   theme: "auto" | "light" | "dark";
+  window_width?: number;
+  window_height?: number;
+}
+
+export interface ShortcutStatus {
+  id: string;
+  label: string;
+  accelerator: string;
+  ok: boolean;
+  source: "app" | "desktop" | "error";
+  message: string;
+}
+
+export interface SaveConfigResult {
+  ok: boolean;
+  saved: boolean;
+  error?: string;
+  shortcuts?: ShortcutStatus[];
+}
+
+export interface OCRTriggerResult {
+  cancelled: boolean;
+  error?: string;
+  text?: string;
 }
 
 declare global {

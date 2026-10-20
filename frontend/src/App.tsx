@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceResult, AppConfig } from "@/types";
 import { ServiceCard } from "@/components/ServiceCard";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -16,7 +16,11 @@ import {
   ClipboardCopy,
   Crop,
   X,
+  Square,
+  Maximize2,
 } from "lucide-react";
+import type { OCRTriggerResult, SaveConfigResult } from "@/types";
+import { shortcutParts } from "@/lib/shortcut";
 
 function applyTheme(theme: AppConfig["theme"]) {
   document.documentElement.classList.toggle(
@@ -40,8 +44,14 @@ export function App() {
   const configRef = useRef<AppConfig | null>(null);
   const querySession = useRef<ReturnType<typeof startQuery> | null>(null);
   const queryVersion = useRef(0);
+  const [isQuerying, setIsQuerying] = useState(false);
+  const isSelectionWindow = Boolean(window.__easydict_selection_window);
+  const [shortcutStatuses, setShortcutStatuses] = useState<import("@/types").ShortcutStatus[]>([]);
 
   useEffect(() => () => querySession.current?.cancel(), []);
+  useEffect(() => {
+    document.documentElement.classList.toggle("selection-window", isSelectionWindow);
+  }, [isSelectionWindow]);
 
   const showToast = (msg: string) => {
     toastManager.add({ title: msg });
@@ -139,6 +149,7 @@ export function App() {
         setConfig(cfg);
         if (cfg.default_target_lang) setToLang(cfg.default_target_lang);
         setIsPinned(cfg.always_on_top);
+        callGo("AppBridge.GetShortcutStatuses").then(setShortcutStatuses).catch(() => {});
 
         applyTheme(cfg.theme);
 
@@ -173,12 +184,14 @@ export function App() {
     querySession.current = null;
     if (!q) {
       setResults([]);
+      setIsQuerying(false);
       return;
     }
 
     const enabled = enabledServices(configRef.current);
     if (enabled.length === 0) {
       setResults([]);
+      setIsQuerying(false);
       showToast("请在设置中启用并配置翻译服务");
       return;
     }
@@ -191,15 +204,36 @@ export function App() {
       }))
     );
 
+    setIsQuerying(true);
     querySession.current = startQuery(
       enabled,
       (id) => callGo("AppBridge.QuerySingle", id, {
         text: q, from_lang: fLang, to_lang: tLang,
       }),
-      (result) => setResults((prev) => prev.map((r) =>
-        r.service_id === result.service_id ? result : r
-      )),
+      (result) => setResults((prev) => {
+        const next = prev.map((r) => r.service_id === result.service_id ? result : r);
+        if (next.length > 0 && next.every((item) => item.status !== "loading")) {
+          queueMicrotask(() => setIsQuerying(false));
+        }
+        return next;
+      }),
+      (pendingIDs) => {
+        const pending = new Set(pendingIDs);
+        setResults((prev) => prev.map((result) =>
+          pending.has(result.service_id) && result.status === "loading"
+            ? { ...result, status: "cancelled" }
+            : result
+        ));
+        setIsQuerying(false);
+      },
     );
+  };
+
+  const stopQuery = () => {
+    queryVersion.current++;
+    querySession.current?.cancel();
+    querySession.current = null;
+    setIsQuerying(false);
   };
 
   const getServiceName = (id: string) => {
@@ -219,14 +253,26 @@ export function App() {
     }
   };
 
+  const shortcutLabel = (value: string) => shortcutParts(value).join(" + ");
+  const loadShortcutStatuses = useCallback(async (): Promise<import("@/types").ShortcutStatus[]> => {
+    if (shortcutStatuses.length > 0) return shortcutStatuses;
+    const latest = await callGo("AppBridge.GetShortcutStatuses");
+    setShortcutStatuses(latest || []);
+    return latest || [];
+  }, [shortcutStatuses]);
+
   const handleRefreshSingle = (serviceId: string) => {
-    if (!querySession.current) return;
+    if (!querySession.current) {
+      if (query.trim()) executeSearch(query.trim());
+      return;
+    }
 
     setResults((prev) =>
       prev.map((r) =>
         r.service_id === serviceId ? { ...r, status: "loading" } : r
       )
     );
+    setIsQuerying(true);
 
     void querySession.current.refresh(serviceId);
   };
@@ -272,9 +318,10 @@ export function App() {
   const handleTriggerOCR = () => {
     setIsOcrLoading(true);
     callGo("AppBridge.TriggerOCR", false)
-      .then(() => {
+      .then((result: OCRTriggerResult) => {
         setIsOcrLoading(false);
-        // The backend delivers the recognized text through __easydict_query.
+        if (result?.cancelled) return;
+        if (result?.error) showToast(result.error);
       })
       .catch((err) => {
         setIsOcrLoading(false);
@@ -290,16 +337,28 @@ export function App() {
     });
   };
 
-  const handleSaveConfig = (newCfg: AppConfig) => {
-    callGo("AppBridge.SaveConfig", newCfg).then((ok: boolean) => {
-      if (ok) {
+  const handleSaveConfig = (newCfg: AppConfig): Promise<SaveConfigResult> => {
+    return callGo("AppBridge.SaveConfig", newCfg).then((result: SaveConfigResult | boolean) => {
+      if (typeof result === "boolean") {
+        return { ok: result, saved: result } as SaveConfigResult;
+      }
+      if (result.saved) {
         const refreshQuery = translationSettingsChanged(configRef.current, newCfg);
         configRef.current = newCfg;
         setConfig(newCfg);
+        setShortcutStatuses(result.shortcuts || []);
         applyTheme(newCfg.theme);
-        showToast("设置已保存");
-        if (refreshQuery && query.trim()) executeSearch(query.trim());
+        const desktopNotes = result.shortcuts?.filter((item) => item.ok && item.source === "desktop") ?? [];
+        if (result.ok) {
+          showToast(desktopNotes.length ? "设置已保存；快捷键由窗口管理器处理" : "设置已保存");
+          if (refreshQuery && query.trim()) executeSearch(query.trim());
+        } else {
+          showToast(result.error || "设置已保存，但部分快捷键没有生效");
+        }
+      } else {
+        showToast(result.error || "设置未完全生效，请查看快捷键提示");
       }
+      return result;
     });
   };
 
@@ -326,6 +385,20 @@ export function App() {
     <div className="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
       {/* Header */}
       <header className="p-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md sticky top-0 z-10 space-y-2">
+        {isSelectionWindow && (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-2.5 py-1.5 text-[11px] text-blue-700 dark:border-blue-950 dark:bg-blue-950/30 dark:text-blue-300">
+            <span className="truncate">划词速览 · 长内容可展开到主窗口</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 shrink-0 gap-1 border-blue-200 bg-white/70 px-2 text-[11px] text-blue-700 dark:border-blue-900 dark:bg-transparent dark:text-blue-300"
+              onClick={() => callGo("AppBridge.ExpandSelectionWindow")}
+            >
+              <Maximize2 className="h-3 w-3" />
+              展开
+            </Button>
+          </div>
+        )}
         {/* Search Bar with Base UI Input */}
         <div className="relative flex items-center">
           <Search className="absolute left-3 w-4 h-4 text-zinc-400 pointer-events-none" />
@@ -349,7 +422,7 @@ export function App() {
                 }
               }
             }}
-            placeholder="输入单词、短语或句子... (快捷键 Alt+A 聚焦)"
+            placeholder={`输入单词、短语或句子... (快捷键 ${shortcutLabel(config?.shortcut_input || "Alt+A")} 聚焦)`}
             className="pl-9 pr-16 h-10 text-sm rounded-lg bg-zinc-50 dark:bg-zinc-900/90 border-zinc-200 dark:border-zinc-800 focus-visible:ring-2 focus-visible:ring-blue-500 shadow-xs"
           />
           <div className="absolute right-2 flex items-center gap-1">
@@ -368,14 +441,28 @@ export function App() {
                 <X className="w-3.5 h-3.5" />
               </Button>
             )}
-            <Button
-              id="search-btn"
-              size="sm"
-              className="h-7 px-2.5 text-xs rounded-md shadow-none font-medium"
-              onClick={() => executeSearch(query)}
-            >
-              翻译
-            </Button>
+            {isQuerying ? (
+              <Button
+                id="stop-btn"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs rounded-md gap-1 font-medium"
+                onClick={stopQuery}
+                title="停止当前查询"
+              >
+                <Square className="h-2.5 w-2.5 fill-current" />
+                停止
+              </Button>
+            ) : (
+              <Button
+                id="search-btn"
+                size="sm"
+                className="h-7 px-2.5 text-xs rounded-md shadow-none font-medium"
+                onClick={() => executeSearch(query)}
+              >
+                翻译
+              </Button>
+            )}
           </div>
         </div>
 
@@ -436,10 +523,10 @@ export function App() {
               size="sm"
               className="h-7 px-2 text-xs gap-1 text-zinc-600 dark:text-zinc-300 rounded-full"
               onClick={handlePasteClipboard}
-              title="读取剪贴板并查询"
+              title="读取系统剪贴板 CLIPBOARD（Ctrl+C 复制的内容），不是鼠标选区 PRIMARY"
             >
               <ClipboardCopy className="w-3 h-3" />
-              剪贴板
+              剪贴板 CLIPBOARD
             </Button>
 
             <Button
@@ -530,22 +617,23 @@ export function App() {
               <div className="text-xs max-w-sm leading-relaxed text-zinc-500 dark:text-zinc-400 space-y-1.5 text-left bg-zinc-100/70 dark:bg-zinc-900/70 p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800">
                 <div className="flex items-center justify-between">
                   <span>输入查词 (聚焦输入框)</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">Alt + A</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">{shortcutLabel(config?.shortcut_input || "Alt+A")}</kbd>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>划词翻译 (选中文本即查)</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">Alt + D</kbd>
+                  <span>划词翻译 (鼠标选区 PRIMARY)</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">{shortcutLabel(config?.shortcut_selection || "Alt+D")}</kbd>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>截图划选并翻译</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">Alt + S</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">{shortcutLabel(config?.shortcut_ocr || "Alt+S")}</kbd>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>静默截图 OCR (复制到剪贴板)</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">Alt + Shift + S</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 font-mono text-[10px]">{shortcutLabel(config?.shortcut_ocr_silent || "Alt+Shift+S")}</kbd>
                 </div>
-                <div className="text-[11px] text-zinc-400 dark:text-zinc-500 pt-1 border-t border-zinc-200 dark:border-zinc-800">
-                  ✨ 划选任意文本会自动在光标旁弹出悬浮小图标，点击图标即可翻译，无需再次点击翻译按钮。
+                <div className="text-[11px] text-zinc-400 dark:text-zinc-500 pt-1 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
+                  <div>鼠标划选的是 PRIMARY 选区；“剪贴板 CLIPBOARD”按钮读取的是 Ctrl+C 复制的内容。</div>
+                  <div>划选文本后可在光标旁点击悬浮图标翻译；应用内快捷键与桌面同名绑定请二选一，避免重复触发。</div>
                 </div>
               </div>
 
@@ -582,6 +670,7 @@ export function App() {
           onClose={() => setIsSettingsOpen(false)}
           config={config}
           onSave={handleSaveConfig}
+          loadShortcutStatuses={loadShortcutStatuses}
         />
       )}
 

@@ -21,17 +21,24 @@ export function enabledServices(config: AppConfig | null): string[] {
   });
 }
 
-// A session owns its results; cancelling it prevents older queries or refreshes from updating the UI.
+// A session owns its results; cancelling it prevents older queries or refreshes
+// from updating the UI and reports the services that were still pending.
 export function startQuery(
   services: string[],
   querySingle: (id: string) => Promise<ServiceResult>,
   onResult: (result: ServiceResult) => void,
+  onCancel?: (serviceIDs: string[]) => void,
 ) {
   let cancelled = false;
   const revisions = new Map<string, number>();
+  const pending = new Set(services);
+  const settled = new Set<string>();
   async function refresh(id: string) {
     const revision = (revisions.get(id) || 0) + 1;
     revisions.set(id, revision);
+    pending.add(id);
+    settled.delete(id);
+    const started = performance.now();
     let result: ServiceResult;
     try {
       result = await querySingle(id);
@@ -42,8 +49,23 @@ export function startQuery(
         error: error instanceof Error ? error.message : String(error),
       };
     }
-    if (!cancelled && revisions.get(id) === revision) onResult({ ...result, service_id: id });
+    if (!result.duration_ms && result.status === "success") {
+      result.duration_ms = Math.max(0, Math.round(performance.now() - started));
+    }
+    if (!cancelled && revisions.get(id) === revision) {
+      pending.delete(id);
+      settled.add(id);
+      onResult({ ...result, service_id: id });
+    }
   }
   for (const id of services) void refresh(id);
-  return { refresh, cancel: () => { cancelled = true; } };
+  return {
+    refresh,
+    cancel: () => {
+      if (cancelled) return;
+      cancelled = true;
+      onCancel?.([...pending].filter((id) => !settled.has(id)));
+      pending.clear();
+    },
+  };
 }

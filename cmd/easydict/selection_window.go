@@ -42,7 +42,8 @@ func (a *Application) showSelectionTranslation(text string, point mygo.Point) {
 		bounds := selectionWindowBounds(point, area)
 		win = a.selectionWindow
 		win.SetBounds(bounds)
-		win.Show()
+		// Keep the source selection active; the popup takes input when clicked.
+		win.ShowInactive()
 	})
 	a.deliverQuery(win, text)
 }

@@ -17,6 +17,7 @@ import (
 	"easydict-linux/internal/bridge"
 	"easydict-linux/internal/config"
 	"easydict-linux/internal/services"
+	"easydict-linux/internal/shortcuts"
 	"github.com/egoist/mygo"
 )
 
@@ -34,6 +35,10 @@ type Application struct {
 	lastSelectionPoint mygo.Point
 	frontendReady      map[*mygo.Window]bool
 	pendingQuery       map[*mygo.Window]string
+	deliveredQuery     map[*mygo.Window]string
+	registeredKeys     []string
+	shortcutStatuses   []shortcuts.Status
+	resizeSaveTimer    *time.Timer
 }
 
 func main() {
@@ -47,10 +52,11 @@ func main() {
 	flag.Parse()
 
 	app := &Application{
-		manager:       services.NewManager(),
-		ocrService:    services.NewOCRService(),
-		frontendReady: make(map[*mygo.Window]bool),
-		pendingQuery:  make(map[*mygo.Window]string),
+		manager:        services.NewManager(),
+		ocrService:     services.NewOCRService(),
+		frontendReady:  make(map[*mygo.Window]bool),
+		pendingQuery:   make(map[*mygo.Window]string),
+		deliveredQuery: make(map[*mygo.Window]string),
 	}
 	app.bridge = bridge.NewAppBridge(
 		app.manager,
@@ -66,8 +72,14 @@ func main() {
 			app.frontendReady[win] = true
 			text := app.pendingQuery[win]
 			delete(app.pendingQuery, win)
+			if text != "" {
+				app.deliveredQuery[win] = text
+			}
 			return text
 		},
+		app.saveConfigAndSyncShortcuts,
+		app.shortcutStatusesSnapshot,
+		app.expandSelectionWindow,
 	)
 
 	// 1. Set App name BEFORE single instance lock so socket hash is consistent
@@ -169,13 +181,53 @@ func (a *Application) initWindow() {
 	// Intercept window close so it hides into system tray instead of terminating
 	stopHidingOnClose := a.window.OnClose(func(e *mygo.CloseEvent) {
 		e.PreventDefault()
+		a.saveWindowSize()
 		a.window.Hide()
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { stopHidingOnClose() })
+	a.window.OnResize(a.scheduleWindowSizeSave)
+	a.window.OnHide(a.saveWindowSize)
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.saveWindowSize() })
 
 	// Load embedded single-page HTML interface
 	a.window.Page().LoadHTML(assets.GetHTML(), "")
 	a.window.Center()
+}
+
+func (a *Application) scheduleWindowSizeSave() {
+	a.mu.Lock()
+	if a.resizeSaveTimer != nil {
+		a.resizeSaveTimer.Stop()
+	}
+	a.resizeSaveTimer = time.AfterFunc(350*time.Millisecond, a.saveWindowSize)
+	a.mu.Unlock()
+}
+
+func (a *Application) saveWindowSize() {
+	a.mu.Lock()
+	if a.resizeSaveTimer != nil {
+		a.resizeSaveTimer.Stop()
+		a.resizeSaveTimer = nil
+	}
+	window := a.window
+	a.mu.Unlock()
+	if window == nil {
+		return
+	}
+	width, height := window.Size()
+	if width < 460 || height < 420 {
+		return
+	}
+	cfg := config.Get()
+	if cfg.WindowWidth == width && cfg.WindowHeight == height {
+		return
+	}
+	if err := cfg.Update(func(c *config.Config) {
+		c.WindowWidth = width
+		c.WindowHeight = height
+	}); err != nil {
+		log.Printf("Save window size: %v", err)
+	}
 }
 
 func (a *Application) initBubbleWindow() {
@@ -216,12 +268,7 @@ func (a *Application) showWindowInput() {
 		return
 	}
 	a.hideBubble()
-	a.mu.Lock()
-	selectionWindow := a.selectionWindow
-	a.mu.Unlock()
-	if selectionWindow != nil {
-		selectionWindow.Hide()
-	}
+	a.hideSelectionWindow()
 	if !a.window.IsVisible() {
 		a.window.Center()
 		a.window.Show()
@@ -242,6 +289,37 @@ func (a *Application) showWindowInput() {
 			}
 		})();
 	`)
+}
+
+func (a *Application) hideSelectionWindow() {
+	a.mu.Lock()
+	selectionWindow := a.selectionWindow
+	a.mu.Unlock()
+	if selectionWindow != nil && selectionWindow.IsVisible() {
+		selectionWindow.Hide()
+	}
+}
+
+// expandSelectionWindow carries the popup's current query into the main
+// window, where a long answer has more room.
+func (a *Application) expandSelectionWindow() {
+	a.mu.Lock()
+	selectionWindow := a.selectionWindow
+	text := a.deliveredQuery[selectionWindow]
+	if selectionWindow != nil {
+		if text == "" {
+			text = a.pendingQuery[selectionWindow]
+		}
+	}
+	a.mu.Unlock()
+	if selectionWindow != nil {
+		selectionWindow.Hide()
+	}
+	if text != "" {
+		a.queryText(text)
+		return
+	}
+	a.showWindowInput()
 }
 
 func (a *Application) positionWindowNearCursor() {
@@ -327,6 +405,7 @@ func (a *Application) deliverQuery(win *mygo.Window, text string) {
 		a.mu.Unlock()
 		return
 	}
+	a.deliveredQuery[win] = text
 	a.mu.Unlock()
 	escaped, _ := json.Marshal(text)
 	cfg, _ := json.Marshal(config.Get())
@@ -350,6 +429,13 @@ func (a *Application) triggerOCRTranslate() {
 
 	img, err := a.ocrService.CaptureScreenArea()
 	if err != nil {
+		if services.IsSelectionCancelled(err) {
+			if wasVisible {
+				a.window.Show()
+			}
+			return
+		}
+		services.SendDesktopNotification("Easydict OCR", "截图失败："+err.Error())
 		if wasVisible {
 			a.window.Show()
 		}
@@ -557,51 +643,172 @@ func (a *Application) initTray() {
 }
 
 func (a *Application) initShortcuts() {
+	statuses := a.syncShortcuts(config.Get())
+	a.mu.Lock()
+	a.shortcutStatuses = statuses
+	a.mu.Unlock()
+	for _, status := range statuses {
+		if !status.OK {
+			log.Printf("Global shortcut %s: %s", status.Accelerator, status.Message)
+		}
+	}
+}
+
+func (a *Application) saveConfigAndSyncShortcuts(newCfg config.Config) shortcuts.SaveResult {
 	cfg := config.Get()
-
-	// 1. 输入查词快捷键 (默认 Alt+A)
-	shortcutInput := cfg.ShortcutInput
-	if shortcutInput == "" {
-		shortcutInput = "Alt+A"
-	}
-	if err := mygo.GlobalShortcut.Register(shortcutInput, func() {
-		a.showWindowInput()
+	if err := cfg.Update(func(c *config.Config) {
+		c.EnabledServices = newCfg.EnabledServices
+		c.DefaultTargetLang = newCfg.DefaultTargetLang
+		c.AIEnabled = newCfg.AIEnabled
+		c.AIBaseURL = newCfg.AIBaseURL
+		c.AIAPIKey = newCfg.AIAPIKey
+		c.AIModel = newCfg.AIModel
+		c.DeepLEnabled = newCfg.DeepLEnabled
+		c.DeepLAuthKey = newCfg.DeepLAuthKey
+		c.DeepLIsFree = newCfg.DeepLIsFree
+		c.AutoQueryClipboard = newCfg.AutoQueryClipboard
+		c.AutoShowFloatingButton = newCfg.AutoShowFloatingButton
+		c.AlwaysOnTop = newCfg.AlwaysOnTop
+		c.ShortcutInput = newCfg.ShortcutInput
+		c.ShortcutSelection = newCfg.ShortcutSelection
+		c.ShortcutOCR = newCfg.ShortcutOCR
+		c.ShortcutOCRSilent = newCfg.ShortcutOCRSilent
+		c.Theme = newCfg.Theme
 	}); err != nil {
-		log.Printf("Global shortcut %s registration notice: %v", shortcutInput, err)
-	}
-
-	// 2. 划词翻译快捷键 (默认 Alt+D)
-	shortcutSelection := cfg.ShortcutSelection
-	if shortcutSelection == "" {
-		shortcutSelection = "Alt+D"
-	}
-	if err := mygo.GlobalShortcut.Register(shortcutSelection, func() {
-		a.querySelection()
-	}); err != nil {
-		log.Printf("Global shortcut %s registration notice: %v", shortcutSelection, err)
-	}
-
-	// 3. 截图翻译快捷键 (默认 Alt+S)
-	shortcutOCR := cfg.ShortcutOCR
-	if shortcutOCR == "" {
-		shortcutOCR = "Alt+S"
-	}
-	if err := mygo.GlobalShortcut.Register(shortcutOCR, func() {
-		go a.triggerOCRTranslate()
-	}); err != nil {
-		log.Printf("Global shortcut %s registration notice: %v", shortcutOCR, err)
+		return shortcuts.SaveResult{OK: false, Error: "保存设置失败：" + err.Error()}
 	}
 
-	// 4. 静默截图 OCR 快捷键 (默认 Alt+Shift+S)
-	shortcutOCRSilent := cfg.ShortcutOCRSilent
-	if shortcutOCRSilent == "" {
-		shortcutOCRSilent = "Alt+Shift+S"
+	result := shortcuts.SaveResult{OK: true, Saved: true, Shortcuts: a.syncShortcuts(cfg)}
+	a.mu.Lock()
+	a.shortcutStatuses = result.Shortcuts
+	a.mu.Unlock()
+	for _, status := range result.Shortcuts {
+		if !status.OK {
+			result.OK = false
+		}
 	}
-	if err := mygo.GlobalShortcut.Register(shortcutOCRSilent, func() {
-		go a.triggerOCRSilent()
-	}); err != nil {
-		log.Printf("Global shortcut %s registration notice: %v", shortcutOCRSilent, err)
+	return result
+}
+
+type shortcutAction struct {
+	value string
+	fn    func()
+}
+
+func (a *Application) syncShortcuts(cfg *config.Config) []shortcuts.Status {
+	actions := []shortcutAction{
+		{cfg.ShortcutInput, a.showWindowInput},
+		{cfg.ShortcutSelection, a.querySelection},
+		{cfg.ShortcutOCR, func() { go a.triggerOCRTranslate() }},
+		{cfg.ShortcutOCRSilent, func() { go a.triggerOCRSilent() }},
 	}
+	labels := []string{"输入查词", "划词翻译", "截图翻译", "静默截图 OCR"}
+	ids := []string{"shortcut_input", "shortcut_selection", "shortcut_ocr", "shortcut_ocr_silent"}
+	defaults := []string{"Alt+A", "Alt+D", "Alt+S", "Alt+Shift+S"}
+
+	for _, key := range a.registeredShortcuts() {
+		mygo.GlobalShortcut.Unregister(key)
+	}
+	a.mu.Lock()
+	a.registeredKeys = nil
+	a.mu.Unlock()
+
+	desktopBindings := loadDesktopBindings()
+	seen := map[string]string{}
+	statuses := make([]shortcuts.Status, len(actions))
+	for i, action := range actions {
+		status := shortcuts.Status{ID: ids[i], Label: labels[i], Accelerator: action.value}
+		value := action.value
+		if strings.TrimSpace(value) == "" {
+			value = defaults[i]
+			status.Accelerator = value
+		}
+		normalized, err := shortcuts.Normalize(value)
+		if err != nil {
+			status.Source = "error"
+			status.Message = "格式无效：" + err.Error()
+			statuses[i] = status
+			continue
+		}
+		status.Accelerator = normalized
+		if other, duplicate := seen[normalized]; duplicate {
+			status.Source = "error"
+			status.Message = "与“" + other + "”使用同一快捷键"
+			statuses[i] = status
+			continue
+		}
+		seen[normalized] = labels[i]
+		conflict := shortcuts.FindDesktopConflict(normalized, desktopBindings)
+		if conflict != nil && !conflict.Easydict {
+			status.Source = "error"
+			status.Message = "已被窗口管理器占用：" + conflict.Description + "。请换一个组合，或移除桌面绑定"
+			statuses[i] = status
+			continue
+		}
+		if conflict != nil && conflict.Easydict {
+			status.OK = true
+			status.Source = "desktop"
+			status.Message = "由窗口管理器处理，应用内不会重复注册"
+			statuses[i] = status
+			continue
+		}
+		if err := mygo.GlobalShortcut.Register(normalized, action.fn); err != nil {
+			status.Source = "error"
+			status.Message = friendlyShortcutError(err)
+			statuses[i] = status
+			continue
+		}
+		a.mu.Lock()
+		a.registeredKeys = append(a.registeredKeys, normalized)
+		a.mu.Unlock()
+		status.OK = true
+		status.Source = "app"
+		statuses[i] = status
+	}
+	return statuses
+}
+
+func (a *Application) registeredShortcuts() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.registeredKeys...)
+}
+
+func (a *Application) shortcutStatusesSnapshot() []shortcuts.Status {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]shortcuts.Status(nil), a.shortcutStatuses...)
+}
+
+func friendlyShortcutError(err error) string {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "already registered"), strings.Contains(message, "already a global shortcut"):
+		return "该快捷键已被其他应用占用，请换一个组合"
+	case strings.Contains(message, "need the app installed"), strings.Contains(message, "GlobalShortcuts portal"):
+		return "Wayland 无法注册全局快捷键：请先执行 make install，并在系统提示中允许快捷键"
+	case strings.Contains(message, "no key for"):
+		return "当前键盘布局不支持这个按键"
+	default:
+		return "注册失败：" + message
+	}
+}
+
+func loadDesktopBindings() []shortcuts.DesktopBinding {
+	if !isCommandAvailable("hyprctl") {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "hyprctl", "binds", "-j").Output()
+	if err != nil {
+		return nil
+	}
+	bindings, err := shortcuts.ParseHyprlandBindings(output)
+	if err != nil {
+		return nil
+	}
+	return bindings
 }
 
 func isCommandAvailable(name string) bool {

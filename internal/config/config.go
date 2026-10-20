@@ -8,8 +8,6 @@ import (
 )
 
 type Config struct {
-	mu sync.RWMutex
-
 	// Translation services
 	EnabledServices   []string `json:"enabled_services"`
 	DefaultTargetLang string   `json:"default_target_lang"`
@@ -44,6 +42,7 @@ type Config struct {
 var (
 	globalConfig *Config
 	configOnce   sync.Once
+	configMu     sync.RWMutex
 )
 
 func DefaultConfig() *Config {
@@ -100,9 +99,6 @@ func loadConfig() *Config {
 }
 
 func (c *Config) Save() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	path := configPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -117,8 +113,8 @@ func (c *Config) Save() error {
 }
 
 func (c *Config) Update(updater func(cfg *Config)) error {
-	c.mu.Lock()
+	configMu.Lock()
 	updater(c)
-	c.mu.Unlock()
+	configMu.Unlock()
 	return c.Save()
 }

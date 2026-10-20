@@ -6,25 +6,46 @@ import (
 
 	"easydict-linux/internal/config"
 	"easydict-linux/internal/services"
+	"easydict-linux/internal/shortcuts"
 	"github.com/egoist/mygo"
 )
 
-// AppBridge is exposed to JavaScript via `mygo.BindAs("AppBridge", ...)` or `mygo.Bind(...)`
-type AppBridge struct {
-	manager        *services.Manager
-	ocrService     *services.OCRService
-	onQueryText    func(text string)
-	onBubbleAction func()
-	onReady        func(*mygo.Window) string
+type OCRTriggerResult struct {
+	Cancelled bool   `json:"cancelled"`
+	Error     string `json:"error,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
-func NewAppBridge(mgr *services.Manager, onQueryText func(text string), onBubbleAction func(), onReady func(*mygo.Window) string) *AppBridge {
+// AppBridge is exposed to JavaScript via `mygo.BindAs("AppBridge", ...)` or `mygo.Bind(...)`
+type AppBridge struct {
+	manager                *services.Manager
+	ocrService             *services.OCRService
+	onQueryText            func(text string)
+	onBubbleAction         func()
+	onReady                func(*mygo.Window) string
+	onExpandSelection      func()
+	saveConfigAndShortcuts func(config.Config) shortcuts.SaveResult
+	getShortcutStatuses    func() []shortcuts.Status
+}
+
+func NewAppBridge(
+	mgr *services.Manager,
+	onQueryText func(text string),
+	onBubbleAction func(),
+	onReady func(*mygo.Window) string,
+	saveConfigAndShortcuts func(config.Config) shortcuts.SaveResult,
+	getShortcutStatuses func() []shortcuts.Status,
+	onExpandSelection func(),
+) *AppBridge {
 	return &AppBridge{
-		manager:        mgr,
-		ocrService:     services.NewOCRService(),
-		onQueryText:    onQueryText,
-		onBubbleAction: onBubbleAction,
-		onReady:        onReady,
+		manager:                mgr,
+		ocrService:             services.NewOCRService(),
+		onQueryText:            onQueryText,
+		onBubbleAction:         onBubbleAction,
+		onReady:                onReady,
+		saveConfigAndShortcuts: saveConfigAndShortcuts,
+		getShortcutStatuses:    getShortcutStatuses,
+		onExpandSelection:      onExpandSelection,
 	}
 }
 
@@ -60,35 +81,27 @@ func (b *AppBridge) GetConfig(ctx context.Context) config.Config {
 	return *cfg
 }
 
-// SaveConfig updates and saves configuration
-func (b *AppBridge) SaveConfig(ctx context.Context, newCfg config.Config) bool {
-	err := config.Get().Update(func(c *config.Config) {
-		c.EnabledServices = newCfg.EnabledServices
-		c.DefaultTargetLang = newCfg.DefaultTargetLang
-		c.AIEnabled = newCfg.AIEnabled
-		c.AIBaseURL = newCfg.AIBaseURL
-		c.AIAPIKey = newCfg.AIAPIKey
-		c.AIModel = newCfg.AIModel
-		c.DeepLEnabled = newCfg.DeepLEnabled
-		c.DeepLAuthKey = newCfg.DeepLAuthKey
-		c.DeepLIsFree = newCfg.DeepLIsFree
-		c.AutoQueryClipboard = newCfg.AutoQueryClipboard
-		c.AutoShowFloatingButton = newCfg.AutoShowFloatingButton
-		c.AlwaysOnTop = newCfg.AlwaysOnTop
-		c.ShortcutInput = newCfg.ShortcutInput
-		c.ShortcutSelection = newCfg.ShortcutSelection
-		c.ShortcutOCR = newCfg.ShortcutOCR
-		c.ShortcutOCRSilent = newCfg.ShortcutOCRSilent
-		c.Theme = newCfg.Theme
-	})
-	if err == nil {
+// SaveConfig updates and saves configuration, then re-registers shortcuts.
+func (b *AppBridge) SaveConfig(ctx context.Context, newCfg config.Config) shortcuts.SaveResult {
+	if b.saveConfigAndShortcuts == nil {
+		return shortcuts.SaveResult{OK: false, Error: "设置保存器未初始化"}
+	}
+	result := b.saveConfigAndShortcuts(newCfg)
+	if result.Saved {
 		win := mygo.CallerWindow(ctx)
 		if win != nil {
 			win.SetAlwaysOnTop(newCfg.AlwaysOnTop)
 		}
-		return true
 	}
-	return false
+	return result
+}
+
+// GetShortcutStatuses returns the registration state from app startup.
+func (b *AppBridge) GetShortcutStatuses(ctx context.Context) []shortcuts.Status {
+	if b.getShortcutStatuses == nil {
+		return nil
+	}
+	return b.getShortcutStatuses()
 }
 
 // GetClipboardText reads CLIPBOARD without falling back to the PRIMARY selection.
@@ -105,15 +118,18 @@ func (b *AppBridge) CopyText(ctx context.Context, text string) bool {
 }
 
 // TriggerOCR triggers interactive screenshot OCR from the frontend UI or shortcuts
-func (b *AppBridge) TriggerOCR(ctx context.Context, silent bool) string {
+func (b *AppBridge) TriggerOCR(ctx context.Context, silent bool) OCRTriggerResult {
 	img, err := b.ocrService.CaptureScreenArea()
 	if err != nil {
-		return ""
+		if services.IsSelectionCancelled(err) {
+			return OCRTriggerResult{Cancelled: true}
+		}
+		return OCRTriggerResult{Error: err.Error()}
 	}
 	text, err := b.ocrService.RecognizeText(img)
 	if err != nil {
 		services.SendDesktopNotification("Easydict OCR 失败", err.Error())
-		return ""
+		return OCRTriggerResult{Error: "未识别出文字：" + err.Error()}
 	}
 
 	if silent {
@@ -123,7 +139,7 @@ func (b *AppBridge) TriggerOCR(ctx context.Context, silent bool) string {
 			preview = string([]rune(preview)[:35]) + "..."
 		}
 		services.SendDesktopNotification("Easydict OCR 成功 (已复制到剪贴板)", preview)
-		return text
+		return OCRTriggerResult{Text: text}
 	}
 
 	// Non-silent: translate text
@@ -131,7 +147,14 @@ func (b *AppBridge) TriggerOCR(ctx context.Context, silent bool) string {
 		b.onQueryText(text)
 	}
 
-	return text
+	return OCRTriggerResult{Text: text}
+}
+
+// ExpandSelectionWindow moves the compact popup query into the main window.
+func (b *AppBridge) ExpandSelectionWindow(ctx context.Context) {
+	if b.onExpandSelection != nil {
+		b.onExpandSelection()
+	}
 }
 
 // OnBubbleClicked handles click on floating selection bubble

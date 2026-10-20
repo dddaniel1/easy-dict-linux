@@ -3,7 +3,9 @@ import { ServiceResult } from "@/types";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Volume2, Copy, RefreshCw, BookOpen, Globe, Sparkles, Zap, FileText } from "lucide-react";
+import { MarkdownText } from "@/components/MarkdownText";
+import { friendlyError } from "@/lib/friendly-error";
+import { Volume2, Copy, RefreshCw, BookOpen, Globe, Sparkles, Zap, FileText, AlertCircle } from "lucide-react";
 
 interface ServiceCardProps {
   result: ServiceResult;
@@ -47,18 +49,40 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
     onSpeak(result.translation || "");
   };
 
+  const sourceLabel = result.is_dictionary
+    ? "词典"
+    : result.service_id === "ai"
+      ? "AI"
+      : "翻译";
+  const canCopy = Boolean(result.translation || result.definitions?.length);
+  const priority = result.is_dictionary ? "ring-1 ring-rose-200/80 dark:ring-rose-900/50" : "";
+
   return (
-    <Card aria-busy={result.status === "loading"} className="hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
+    <Card
+      aria-busy={result.status === "loading"}
+      className={`${priority} hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors`}
+    >
       <CardHeader>
-        <CardTitle>
+        <CardTitle className="min-w-0">
           {getIcon()}
-          <span>{result.service_name}</span>
+          <span className="truncate">{result.service_name}</span>
+          <Badge variant={result.is_dictionary ? "pos" : "secondary"} className="shrink-0 text-[10px]">
+            {sourceLabel}
+          </Badge>
+          {result.status === "success" && result.duration_ms !== undefined && (
+            <span className="shrink-0 text-[10px] font-normal text-zinc-400">
+              {result.duration_ms < 1000 ? `${result.duration_ms} ms` : `${(result.duration_ms / 1000).toFixed(1)} s`}
+            </span>
+          )}
           {result.status === "loading" && (
-            <span className="text-xs font-normal text-zinc-400">查询中...</span>
+            <span className="shrink-0 text-xs font-normal text-zinc-400">查询中...</span>
+          )}
+          {result.status === "cancelled" && (
+            <span className="shrink-0 text-xs font-normal text-zinc-400">已停止</span>
           )}
         </CardTitle>
-        <div className="flex items-center gap-1">
-          {(result.translation || (result.definitions && result.definitions.length > 0)) && (
+        <div className="flex shrink-0 items-center gap-1">
+          {canCopy && (
             <Button
               variant="ghost"
               size="icon"
@@ -69,15 +93,17 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
               <Volume2 className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            onClick={copyContent}
-            title="复制"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
+          {canCopy && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+              onClick={copyContent}
+              title="复制"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -99,8 +125,37 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
         )}
 
         {result.status === "error" && (
-          <div className="p-3 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-xs rounded-md">
-            ❌ {result.error || "服务请求出错"}
+          <div className="flex items-start gap-2.5 rounded-lg border border-red-100 bg-red-50/80 p-3 text-xs text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">暂时无法获取结果</div>
+              <div className="mt-0.5 leading-relaxed text-red-600/90 dark:text-red-300/90">
+                {friendlyError(result.service_id, result.error)}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-6 border-red-200 bg-white/70 px-2 text-[11px] text-red-700 hover:bg-white dark:border-red-900 dark:bg-transparent dark:text-red-300"
+                onClick={() => onRefresh(result.service_id)}
+              >
+                <RefreshCw className="mr-1 h-3 w-3" />
+                重试
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {result.status === "cancelled" && (
+          <div className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+            <span>查询已停止</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => onRefresh(result.service_id)}
+            >
+              重新查询
+            </Button>
           </div>
         )}
 
@@ -146,11 +201,9 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
               </div>
             )}
 
-            {/* Translation Result (Plain text or Markdown) */}
+            {/* Translation Result (plain text or model Markdown) */}
             {result.translation && (!result.definitions || result.definitions.length === 0) && (
-              <div className="text-xs leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
-                {result.translation}
-              </div>
+              <MarkdownText text={result.translation} />
             )}
 
             {/* Example Sentences */}

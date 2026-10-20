@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,15 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrSelectionCancelled means the user dismissed the screenshot region picker.
+var ErrSelectionCancelled = errors.New("截图选区已取消")
+
+// IsSelectionCancelled reports whether a screenshot error came from the user
+// dismissing the region picker instead of an OCR or capture failure.
+func IsSelectionCancelled(err error) bool {
+	return errors.Is(err, ErrSelectionCancelled)
+}
 
 // OCRService provides screenshot capture and text recognition capabilities
 type OCRService struct {
@@ -40,11 +50,14 @@ func (o *OCRService) CaptureScreenArea() ([]byte, error) {
 		var slurpOut bytes.Buffer
 		slurpCmd.Stdout = &slurpOut
 		if err := slurpCmd.Run(); err != nil {
-			return nil, fmt.Errorf("selection canceled or failed: %w", err)
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("截图选区超时: %w", ctx.Err())
+			}
+			return nil, fmt.Errorf("%w: %v", ErrSelectionCancelled, err)
 		}
 		geom := strings.TrimSpace(slurpOut.String())
 		if geom == "" {
-			return nil, fmt.Errorf("selection was empty")
+			return nil, ErrSelectionCancelled
 		}
 
 		// Run grim to capture the selected area

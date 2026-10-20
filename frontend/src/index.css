@@ -63,6 +63,18 @@ body {
   animation: feedback-in 200ms var(--motion-ease-out);
 }
 
+/* The compact selection popup gives the answer a bounded reading area while
+   leaving the header and tabs reachable. "展开" moves long content to the
+   full main window. */
+.selection-window main {
+  padding-bottom: 1rem;
+}
+
+.selection-window main > :not(.h-full) {
+  max-height: 21rem;
+  overflow-y: auto;
+}
+
 @keyframes feedback-in {
   from {
     opacity: 0;

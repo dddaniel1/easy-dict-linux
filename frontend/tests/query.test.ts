@@ -88,3 +88,20 @@ test("unconfigured paid services are skipped; local AI requires no API key", () 
   cfg.ai_base_url = "https://localhost.example.com/v1";
   assert.deepEqual(enabledServices(cfg), ["youdao"]);
 });
+
+test("cancelling reports only services that are still loading", async () => {
+  const slow = deferred<ServiceResult>();
+  const cancelled: string[][] = [];
+  const session = startQuery(
+    ["fast", "slow"],
+    (id) => id === "fast" ? Promise.resolve(result(id, "done")) : slow.promise,
+    () => {},
+    (ids) => cancelled.push(ids),
+  );
+  await settle();
+  session.cancel();
+  assert.deepEqual(cancelled, [["slow"]]);
+  slow.resolve(result("slow", "late"));
+  await settle();
+  assert.deepEqual(cancelled, [["slow"]]);
+});

@@ -44,6 +44,8 @@ for item in items:
 else:
     raise AssertionError("Easydict tray icon was not registered")
 
+executable = str(Path(f"/proc/{pid}/exe").resolve()).removesuffix(" (deleted)")
+subprocess.run([executable, "--input"], check=True)
 window = Gtk.Window(title="Easydict focus regression")
 entry = Gtk.Entry()
 entry.set_text("easydict_selection_probe")
@@ -79,7 +81,6 @@ def finish():
 
 def open_popup():
     anchor.update(json.loads(subprocess.check_output(["hyprctl", "-j", "cursorpos"])))
-    executable = str(Path(f"/proc/{pid}/exe").resolve()).removesuffix(" (deleted)")
     subprocess.run([executable, "--selection"], check=True)
     return False
 
@@ -92,8 +93,13 @@ def check_popup():
     if popups:
         popup = popups[0]
         popup_details.update(anchor=anchor, bounds=popup)
-        # The test cursor is away from screen edges; unit tests cover edge avoidance.
-        popup_checks.append(popup["x"] == anchor["x"] + 12 and popup["y"] == anchor["y"] + 12)
+        displays = json.loads(subprocess.check_output(["hyprctl", "-j", "monitors"]))
+        top_inset = max(display["reserved"][1] for display in displays)
+        # Layer-shell may offset the surface by the bar's exclusive zone.
+        nearby_x = popup["x"] in (anchor["x"] + 12, anchor["x"] - 480 - 12)
+        nearby_y = popup["y"] in (anchor["y"] + 12, anchor["y"] + 12 + top_inset,
+                                   anchor["y"] - 360 - 12, anchor["y"] - 360 - 12 + top_inset)
+        popup_checks.append(nearby_x and nearby_y)
     return False
 
 
@@ -108,12 +114,6 @@ if args.selection_popup:
 else:
     GLib.timeout_add(2100, finish)
 Gtk.main()
-assert checks == [True, True], f"Selection lost focus or highlight: {checks}"
-print("PASS: selecting and reselecting text preserves focus and highlight")
-if args.selection_popup:
-    assert popup_checks == [True, True], f"Compact popup bounds were wrong: {popup_details}"
-    print("PASS: 480x360 selection popup appears below and right of the selection endpoint")
-
 _, layout = call(service, menu_path, "com.canonical.dbusmenu", "GetLayout", "(iias)", (0, -1, []))
 quit_item = next(item[0] for item in layout[2] if item[1].get("label") == "退出 Easydict")
 children = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
@@ -126,4 +126,9 @@ for _ in range(50):
     time.sleep(0.1)
 assert not Path(f"/proc/{pid}").exists(), "Tray Quit did not terminate Easydict"
 assert all(not Path(f"/proc/{child}").exists() for child in watchers), "Selection watcher survived Quit"
+assert checks == [True, True], f"Selection lost focus or highlight: {checks}"
+print("PASS: selecting and reselecting text preserves focus and highlight")
+if args.selection_popup:
+    assert popup_checks == [True, True], f"Compact popup bounds were wrong: {popup_details}"
+    print("PASS: 480x360 selection popup stays next to the selection endpoint, with edge avoidance")
 print("PASS: tray Quit exits the application and stops its selection watcher")

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"easydict-linux/internal/config"
 )
@@ -66,6 +67,7 @@ func (m *Manager) QueryAll(req QueryRequest) []ServiceResult {
 		wg.Add(1)
 		go func(idx int, p TranslationProvider) {
 			defer wg.Done()
+			started := time.Now()
 			res, err := p.Translate(req)
 			if err != nil {
 				results[idx] = ServiceResult{
@@ -73,11 +75,13 @@ func (m *Manager) QueryAll(req QueryRequest) []ServiceResult {
 					ServiceName: p.Name(),
 					Status:      "error",
 					Error:       err.Error(),
+					DurationMS:  time.Since(started).Milliseconds(),
 				}
 				return
 			}
 			if res != nil {
 				results[idx] = *res
+				results[idx].DurationMS = time.Since(started).Milliseconds()
 			}
 		}(i, provider)
 	}
@@ -107,6 +111,7 @@ func (m *Manager) QuerySingle(serviceID string, req QueryRequest) *ServiceResult
 			Error:     "Service not found",
 		}
 	}
+	started := time.Now()
 	res, err := p.Translate(req)
 	if err != nil {
 		return &ServiceResult{
@@ -114,7 +119,11 @@ func (m *Manager) QuerySingle(serviceID string, req QueryRequest) *ServiceResult
 			ServiceName: p.Name(),
 			Status:      "error",
 			Error:       err.Error(),
+			DurationMS:  time.Since(started).Milliseconds(),
 		}
+	}
+	if res != nil {
+		res.DurationMS = time.Since(started).Milliseconds()
 	}
 	return res
 }

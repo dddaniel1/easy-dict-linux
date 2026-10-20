@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "version": "1.0.0",
-  "description": "",
+  "description": "React frontend for Easydict for Linux",
   "main": "index.js",
   "scripts": {
     "build": "vite build && vite build --mode bubble",
@@ -10,7 +10,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "GPL-3.0-only",
   "packageManager": "pnpm@12.14.0",
   "type": "module",
   "dependencies": {
