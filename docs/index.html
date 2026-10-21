@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Easydict for Linux — 选中文字，答案就在光标旁边</title>
+<meta name="description" content="Easydict for Linux 是一个为 Linux 桌面打造的多源词典与翻译工具：划词翻译、截图 OCR、五家来源并发查询。Go + React，GPL-3.0。">
+<meta name="theme-color" content="#f4f7fb">
+<meta property="og:title" content="Easydict for Linux">
+<meta property="og:description" content="选中文字，答案就在光标旁边。多源词典与翻译，为 Linux 桌面而做。">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/screenshot.png">
+<link rel="icon" href="assets/icon.png" type="image/png">
+<link rel="preload" href="assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/source-serif-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .5C5.73.5.9 5.33.9 11.6c0 4.9 3.17 9.05 7.57 10.52.55.1.75-.24.75-.53v-2.07c-3.08.67-3.73-1.3-3.73-1.3-.5-1.28-1.23-1.62-1.23-1.62-1-.69.08-.67.08-.67 1.11.08 1.7 1.14 1.7 1.14.99 1.7 2.6 1.21 3.23.93.1-.72.39-1.21.7-1.49-2.46-.28-5.05-1.23-5.05-5.48 0-1.21.43-2.2 1.14-2.98-.12-.28-.5-1.41.1-2.94 0 0 .93-.3 3.05 1.14a10.6 10.6 0 0 1 5.55 0c2.12-1.44 3.05-1.14 3.05-1.14.6 1.53.22 2.66.11 2.94.71.78 1.14 1.77 1.14 2.98 0 4.26-2.6 5.2-5.07 5.47.4.35.76 1.03.76 2.08v3.08c0 .3.2.64.76.53a11.1 11.1 0 0 0 7.56-10.52C23.1 5.33 18.27.5 12 .5Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.13 1.58a.5.5 0 0 1 0 .96l-6.13 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-crop" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6A1.4 1.4 0 0 1 5.4 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.4 18.4a9 9 0 0 0 0-12.8"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/></symbol>
+  <symbol id="i-tray" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-selection" viewBox="0 0 24 24"><path d="M4 4h4"/><path d="M4 20h4"/><path d="M16 4h4"/><path d="M16 20h4"/><path d="M4 8v4"/><path d="M4 16v.01"/><path d="M20 8v4"/><path d="M20 16v.01"/><path d="M9 12h6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+</svg>
+
+<a class="skip-link" href="#main" data-i18n="a11y.skip">跳到主要内容</a>
+
+<header class="site-header" id="siteHeader">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top" aria-label="Easydict for Linux">
+      <img src="assets/icon.png" width="28" height="28" alt="">
+      <span class="brand-name">Easydict<span class="brand-suffix">for Linux</span></span>
+    </a>
+
+    <nav class="site-nav" aria-label="页面导航" data-i18n-attr="aria-label:nav.label">
+      <a href="#selection" data-i18n="nav.selection">划词</a>
+      <a href="#sources" data-i18n="nav.sources">来源</a>
+      <a href="#ocr" data-i18n="nav.ocr">截图</a>
+      <a href="#details" data-i18n="nav.details">细节</a>
+      <a href="#install" data-i18n="nav.install">安装</a>
+    </nav>
+
+    <div class="header-actions">
+      <button class="lang-toggle" id="langToggle" type="button" aria-label="Switch to English">
+        <span aria-hidden="true">EN</span>
+      </button>
+      <a class="gh-link" href="https://github.com/dddaniel1/easy-dict-linux" target="_blank" rel="noreferrer">
+        <svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1 data-i18n="hero.title">选中文字，<br>答案就在光标旁边</h1>
+        <p class="lede" data-i18n="hero.lede">Easydict for Linux 把词典和翻译放进一个小浮窗。选中单词或句子，按 <kbd>Alt</kbd> <kbd>D</kbd>，有道、Bing、Google、AI 与 DeepL 同时开始查询——你不用离开正在读的那一页。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#install">
+            <span data-i18n="hero.cta">安装 Easydict</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+          </a>
+          <a class="btn btn-quiet" href="https://github.com/dddaniel1/easy-dict-linux" target="_blank" rel="noreferrer">
+            <span data-i18n="hero.secondary">查看源码</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow-up-right"/></svg>
+          </a>
+        </div>
+        <ul class="hero-meta">
+          <li>GPL-3.0</li>
+          <li>Wayland / X11</li>
+          <li data-i18n="hero.meta.local">配置保存在本地</li>
+        </ul>
+      </div>
+
+      <div class="hero-visual">
+        <div class="app-window reveal-hero">
+          <div class="window-bar">
+            <img class="window-icon" src="assets/icon.png" width="16" height="16" alt="">
+            <span class="window-title">Easydict</span>
+            <div class="window-controls" aria-hidden="true">
+              <svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg>
+              <svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+              <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+            </div>
+          </div>
+          <img class="window-shot" src="assets/screenshot.png" width="1024" height="928"
+               alt="Easydict 主窗口：查询 apple，有道词典卡片显示音标、释义与双语例句，Bing 卡片正在加载。"
+               data-i18n-attr="alt:hero.shotAlt">
+        </div>
+        <div class="keycap-chip reveal-hero" aria-hidden="true">
+          <kbd>Alt</kbd><span class="plus">+</span><kbd>D</kbd>
+          <span class="chip-label" data-i18n="hero.chip">划词翻译</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section selection" id="selection">
+    <div class="wrap split">
+      <div class="split-copy">
+        <h2 data-i18n="selection.title">划词翻译：选中，浮窗就在光标旁。</h2>
+        <p class="lede" data-i18n="selection.lede">读取 Linux 的 <code>PRIMARY</code> 选区——鼠标选中后用中键粘贴的那份内容。它和 <kbd>Ctrl</kbd> <kbd>C</kbd> 复制到剪贴板的内容互相独立。</p>
+        <ul class="fact-list">
+          <li>
+            <h3 data-i18n="selection.f1.title">展开到主窗口</h3>
+            <p data-i18n="selection.f1.body">浮窗里点「展开」，同一份结果转到主窗口，五个来源完整铺开。</p>
+          </li>
+          <li>
+            <h3 data-i18n="selection.f2.title">随时可以停</h3>
+            <p data-i18n="selection.f2.body">查询中可以停止；某个服务失败或超时，单独重试即可，不必重查全部。</p>
+          </li>
+          <li>
+            <h3 data-i18n="selection.f3.title">键盘优先</h3>
+            <p data-i18n="selection.f3.body"><kbd>Alt</kbd> <kbd>D</kbd> 划词，<kbd>Alt</kbd> <kbd>A</kbd> 直接打开输入框。快捷键可以在设置里重新录制。</p>
+          </li>
+        </ul>
+      </div>
+
+      <div class="split-visual selection-demo reveal" aria-label="划词翻译演示" role="img" data-i18n-attr="aria-label:selection.demoAlt">
+        <div class="paper">
+          <p class="paper-text">Yesterday I bought a bag of apples at the market. They were <mark class="sel">crisp, sweet, and a little tart</mark> — the kind you remember from childhood. I left one on the desk before heading out.</p>
+          <span class="cursor-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6.5 1.5L10 19z" fill="currentColor"/></svg>
+          </span>
+          <span class="bubble" aria-hidden="true">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-languages"/></svg>
+          </span>
+        </div>
+
+        <div class="popup">
+          <div class="popup-head">
+            <svg class="icon youdao" aria-hidden="true"><use href="#i-book"/></svg>
+            <span class="popup-title">有道词典</span>
+            <span class="badge badge-dict">词典</span>
+            <span class="popup-ms">87 ms</span>
+            <span class="popup-tools" aria-hidden="true">
+              <svg class="icon"><use href="#i-volume"/></svg>
+              <svg class="icon"><use href="#i-copy"/></svg>
+              <svg class="icon"><use href="#i-refresh"/></svg>
+            </span>
+            <span class="popup-expand" data-i18n="selection.expand">展开</span>
+          </div>
+          <div class="popup-body">
+            <div class="phonetics">
+              <span class="phonetic"><em>UK</em> [ˈæp(ə)l]</span>
+              <span class="phonetic"><em>US</em> [ˈæp(ə)l]</span>
+            </div>
+            <p class="definition"><span class="pos">n.</span> 苹果；苹果树；苹果公司（Apple Inc.）</p>
+            <p class="examples-label" data-i18n="selection.examples">权威双语例句</p>
+            <div class="example">
+              <p class="ex-src">She crunched her apple noisily.</p>
+              <p class="ex-dst">她吃苹果发出嘎嚓嘎嚓的声音。</p>
+              <span class="ex-from">— 《牛津词典》</span>
+            </div>
+            <div class="example">
+              <p class="ex-src">Someone threw an apple core.</p>
+              <p class="ex-dst">有人扔了一个苹果核。</p>
+              <span class="ex-from">— 《柯林斯英汉双解大词典》</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section sources" id="sources">
+    <div class="wrap sources-grid">
+      <div class="sources-copy">
+        <h2 data-i18n="sources.title">一次查询，<br>五种来源。</h2>
+        <p class="lede" data-i18n="sources.lede">五个服务并发请求，谁先返回谁先显示；词典结果排在翻译前面。</p>
+        <p class="small" data-i18n="sources.note">AI 服务支持 OpenAI 兼容接口，可接 DeepSeek、OpenAI 或本地 Ollama；DeepL 使用官方 API Key。</p>
+      </div>
+
+      <ul class="source-list">
+        <li class="source-row">
+          <span class="source-icon is-youdao"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span>
+          <div class="source-body">
+            <h3>有道词典</h3>
+            <p data-i18n="sources.youdao">音标、词性、释义与权威双语例句</p>
+          </div>
+          <span class="tag" data-i18n="sources.tagDict">词典</span>
+        </li>
+        <li class="source-row">
+          <span class="source-icon is-bing"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
+          <div class="source-body">
+            <h3>Bing 词典 / 翻译</h3>
+            <p data-i18n="sources.bing">双解词典与整句翻译</p>
+          </div>
+          <span class="tag" data-i18n="sources.tagDict">词典</span>
+        </li>
+        <li class="source-row">
+          <span class="source-icon is-google"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
+          <div class="source-body">
+            <h3>Google 翻译</h3>
+            <p data-i18n="sources.google">多语言自动识别</p>
+          </div>
+          <span class="tag" data-i18n="sources.tagTranslate">翻译</span>
+        </li>
+        <li class="source-row">
+          <span class="source-icon is-ai"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+          <div class="source-body">
+            <h3>AI 智能词典</h3>
+            <p data-i18n="sources.ai">结构化释义与译注，兼容 OpenAI 风格接口</p>
+          </div>
+          <span class="tag" data-i18n="sources.tagAI">AI</span>
+        </li>
+        <li class="source-row">
+          <span class="source-icon is-deepl"><svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg></span>
+          <div class="source-body">
+            <h3>DeepL</h3>
+            <p data-i18n="sources.deepl">官方翻译 API</p>
+          </div>
+          <span class="tag" data-i18n="sources.tagTranslate">翻译</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band ocr" id="ocr">
+    <div class="wrap split split-reverse">
+      <div class="split-visual ocr-demo reveal" aria-label="截图翻译演示" role="img" data-i18n-attr="aria-label:ocr.demoAlt">
+        <div class="ocr-frame">
+          <img src="assets/screenshot.png" width="1024" height="928" alt="">
+          <div class="marquee" aria-hidden="true">
+            <span class="handle tl"></span><span class="handle tr"></span>
+            <span class="handle bl"></span><span class="handle br"></span>
+          </div>
+        </div>
+        <div class="ocr-toolbar">
+          <svg class="icon" aria-hidden="true"><use href="#i-crop"/></svg>
+          <span data-i18n="ocr.toolbar">截图 OCR</span>
+          <kbd>Alt</kbd><kbd>S</kbd>
+        </div>
+        <div class="ocr-result">
+          <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+          <span data-i18n="ocr.result">识别完成 · 已复制</span>
+        </div>
+      </div>
+
+      <div class="split-copy">
+        <h2 data-i18n="ocr.title">屏幕上的字，也能查。</h2>
+        <p class="lede" data-i18n="ocr.lede">框选屏幕上的任意区域，OCR 识别后直接翻译。图片、视频字幕、不能复制的界面，都不再是障碍。</p>
+        <ul class="fact-list">
+          <li>
+            <h3 data-i18n="ocr.f1.title">截图翻译 · <kbd>Alt</kbd> <kbd>S</kbd></h3>
+            <p data-i18n="ocr.f1.body">框选后进入主窗口，原文与译文对照显示。</p>
+          </li>
+          <li>
+            <h3 data-i18n="ocr.f2.title">静默 OCR · <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>S</kbd></h3>
+            <p data-i18n="ocr.f2.body">识别后直接复制文本，不打断当前窗口。</p>
+          </li>
+          <li>
+            <h3 data-i18n="ocr.f3.title">本地回退</h3>
+            <p data-i18n="ocr.f3.body">OCR 首选在线服务；网络不可用时回退到本地 Tesseract（可选安装）。</p>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section details" id="details">
+    <div class="wrap">
+      <h2 data-i18n="details.title">为 Linux 桌面做的细节。</h2>
+
+      <div class="detail-grid">
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-selection"/></svg>
+          <h3 data-i18n="details.d1.title">读取 PRIMARY 选区</h3>
+          <p data-i18n="details.d1.body">用鼠标选中就足够，不必先按 <kbd>Ctrl</kbd> <kbd>C</kbd>。</p>
+        </article>
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>
+          <h3 data-i18n="details.d2.title">Wayland 优先监听</h3>
+          <p data-i18n="details.d2.body">优先使用 <code>wl-paste --primary --watch</code>；合成器不支持时自动回退到轮询。</p>
+        </article>
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg>
+          <h3 data-i18n="details.d3.title">快捷键冲突检查</h3>
+          <p data-i18n="details.d3.body">保存时检查格式、应用内重复，以及 Hyprland 桌面绑定冲突。</p>
+        </article>
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-tray"/></svg>
+          <h3 data-i18n="details.d4.title">常驻托盘</h3>
+          <p data-i18n="details.d4.body">关闭窗口只是隐藏；窗口尺寸会被记住，下次打开还是原样。</p>
+        </article>
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>
+          <h3 data-i18n="details.d5.title">主题跟随系统</h3>
+          <p data-i18n="details.d5.body">浅色、深色或跟随系统，在设置里一键切换。</p>
+        </article>
+        <article class="detail">
+          <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>
+          <h3 data-i18n="details.d6.title">原生右键菜单</h3>
+          <p data-i18n="details.d6.body">在主窗口右键，即可翻译选中文本、剪贴板内容，或启动截图 OCR。</p>
+        </article>
+      </div>
+
+      <div class="shortcut-block">
+        <div class="shortcut-intro">
+          <h3 data-i18n="shortcuts.title">默认快捷键</h3>
+          <p class="small" data-i18n="shortcuts.note">快捷键可在设置中重新录制，保存时会检查格式与冲突。</p>
+        </div>
+        <table class="shortcut-table">
+          <thead>
+            <tr>
+              <th scope="col" data-i18n="shortcuts.colAction">功能</th>
+              <th scope="col" data-i18n="shortcuts.colKeys">快捷键</th>
+              <th scope="col" data-i18n="shortcuts.colCli">命令行参数</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-i18n="shortcuts.input">输入查词</td>
+              <td><kbd>Alt</kbd><kbd>A</kbd></td>
+              <td><code>easydict --input</code></td>
+            </tr>
+            <tr>
+              <td data-i18n="shortcuts.selection">划词翻译</td>
+              <td><kbd>Alt</kbd><kbd>D</kbd></td>
+              <td><code>easydict --selection</code></td>
+            </tr>
+            <tr>
+              <td data-i18n="shortcuts.ocr">截图翻译</td>
+              <td><kbd>Alt</kbd><kbd>S</kbd></td>
+              <td><code>easydict --ocr</code></td>
+            </tr>
+            <tr>
+              <td data-i18n="shortcuts.ocrSilent">静默截图 OCR</td>
+              <td><kbd>Alt</kbd><kbd>Shift</kbd><kbd>S</kbd></td>
+              <td><code>easydict --ocr-silent</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section install" id="install">
+    <div class="wrap">
+      <div class="install-head">
+        <h2 data-i18n="install.title">从源码安装。</h2>
+        <p class="lede" data-i18n="install.lede">需要 Go 1.27+、Node.js 与 pnpm，以及 webkit2gtk-4.1。<code>make install</code> 会把程序装到 <code>~/.local/bin</code>，并注册桌面入口与图标。</p>
+      </div>
+
+      <div class="install-grid">
+        <div class="install-main">
+          <div class="code-block">
+            <div class="code-head">
+              <span class="code-lang">bash</span>
+              <button class="copy-btn" type="button" data-copy="#install-code" data-i18n-attr="aria-label:install.copyAria">
+                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>
+                <span data-i18n="install.copy">复制</span>
+              </button>
+            </div>
+            <pre id="install-code"><code>git clone https://github.com/dddaniel1/easy-dict-linux.git
+cd easy-dict-linux
+pnpm --dir frontend install
+make build
+make install</code></pre>
+          </div>
+          <p class="small" data-i18n="install.run">安装后运行 <code>easydict</code>。开发时可执行 <code>make test</code>，运行 Go 与前端测试。</p>
+
+          <div class="wm">
+            <div class="wm-head">
+              <h3 data-i18n="install.wm.title">桌面快捷键绑定</h3>
+              <div class="tabs" role="tablist" aria-label="窗口管理器" data-i18n-attr="aria-label:install.wm.tabsAria">
+                <button class="tab is-active" role="tab" id="tab-hyprland" aria-selected="true" aria-controls="panel-hyprland" type="button">Hyprland</button>
+                <button class="tab" role="tab" id="tab-sway" aria-selected="false" aria-controls="panel-sway" tabindex="-1" type="button">Sway / i3</button>
+              </div>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-hyprland" aria-labelledby="tab-hyprland">
+              <pre class="wm-code"><code>bind = ALT, A, exec, easydict --input
+bind = ALT, D, exec, easydict --selection
+bind = ALT, S, exec, easydict --ocr
+bind = ALT SHIFT, S, exec, easydict --ocr-silent</code></pre>
+            </div>
+            <div class="tab-panel" role="tabpanel" id="panel-sway" aria-labelledby="tab-sway" hidden>
+              <pre class="wm-code"><code>bindsym Mod1+a exec easydict --input
+bindsym Mod1+d exec easydict --selection
+bindsym Mod1+s exec easydict --ocr
+bindsym Mod1+Shift+s exec easydict --ocr-silent</code></pre>
+            </div>
+
+            <p class="small warn" data-i18n="install.wm.note">如果窗口管理器已经绑定这些命令，请关闭应用内同名快捷键，避免一次按键触发两次。</p>
+          </div>
+        </div>
+
+        <aside class="deps">
+          <h3 data-i18n="install.deps.title">依赖</h3>
+          <p class="small" data-i18n="install.deps.arch">Arch Linux 一次装齐：</p>
+          <pre class="deps-code"><code>sudo pacman -S go nodejs pnpm \
+  webkit2gtk-4.1 wl-clipboard \
+  grim slurp tesseract</code></pre>
+          <dl class="dep-list">
+            <div>
+              <dt data-i18n="install.deps.wayland">Wayland</dt>
+              <dd><code>wl-clipboard</code>、<code>grim</code>、<code>slurp</code></dd>
+            </div>
+            <div>
+              <dt>X11</dt>
+              <dd><code>xclip</code> <span data-i18n="install.deps.or">或</span> <code>xsel</code>、ImageMagick</dd>
+            </div>
+            <div>
+              <dt>OCR</dt>
+              <dd data-i18n="install.deps.ocr">可选本地回退：<code>tesseract</code></dd>
+            </div>
+          </dl>
+          <p class="small" data-i18n="install.deps.note">不同发行版的包名可能不同；Arch 之外的系统请按对应名称安装。</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-limits">
+      <h2 data-i18n="footer.limitsTitle">已知限制</h2>
+      <ul>
+        <li data-i18n="footer.limit1">有道词典主要面向英译中；其他语言组合建议使用 Bing、Google、AI 或 DeepL。</li>
+        <li data-i18n="footer.limit2">Wayland 全局快捷键能否使用，取决于桌面环境与 GlobalShortcuts portal。</li>
+        <li data-i18n="footer.limit3">应用内快捷键与窗口管理器绑定应二选一，否则会重复触发。</li>
+      </ul>
+    </div>
+    <div class="footer-meta">
+      <p data-i18n="footer.config">配置保存在 <code>~/.config/easydict-linux/config.json</code>；API Key 以明文写入该文件。</p>
+      <div class="footer-links">
+        <a href="https://github.com/dddaniel1/easy-dict-linux" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/dddaniel1/easy-dict-linux#readme" target="_blank" rel="noreferrer">README</a>
+        <a href="https://github.com/dddaniel1/easy-dict-linux/issues" target="_blank" rel="noreferrer">Issues</a>
+        <a href="https://github.com/dddaniel1/easy-dict-linux/blob/master/LICENSE" target="_blank" rel="noreferrer">GPL-3.0</a>
+      </div>
+      <p class="small" data-i18n="footer.credit">交互方式参考 <a href="https://github.com/tisfeng/Easydict" target="_blank" rel="noreferrer">tisfeng/Easydict</a>，使用 Go、mygo、React 与 Base UI 构建。</p>
+    </div>
+  </div>
+</footer>
+
+<div class="sr-only" role="status" aria-live="polite" id="liveRegion"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

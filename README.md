@@ -5,6 +5,8 @@
 [mygo](https://github.com/egoist/mygo) 构建原生窗口，界面采用 React 19、Tailwind CSS
 和 Base UI。
 
+[官网与截图](https://dddaniel1.github.io/easy-dict-linux/) · [安装](#安装) · [快捷键](#快捷键)
+
 ![Easydict for Linux](assets/screenshot.png)
 
 ## 功能
@@ -155,10 +157,19 @@ Model:    qwen2.5:7b
 │   ├── config/            # 配置加载与持久化
 │   ├── services/          # 翻译、词典、OCR、选区与剪贴板
 │   └── shortcuts/         # 快捷键规范化与 Hyprland 冲突检测
+├── docs/                  # 静态落地页（GitHub Pages）
 ├── scripts/check-desktop.py
 ├── Makefile
 └── easydict.desktop
 ```
+
+落地页是 `docs/` 下的纯静态页面，不依赖构建步骤。本地预览：
+
+```bash
+python3 -m http.server --directory docs 8000
+```
+
+推送到 `master` 后，`.github/workflows/pages.yml` 会把 `docs/` 发布到 GitHub Pages。
 
 ## 测试
 
